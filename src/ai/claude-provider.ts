@@ -3,6 +3,7 @@
  * LLM Provider implementation for Anthropic Claude API
  */
 
+import { requestUrl } from 'obsidian';
 import { ChatMessage, ChatResponse, AnalysisResult, EntityPreview } from '../entities/types';
 
 export interface ClaudeConfig {
@@ -86,30 +87,30 @@ export class ClaudeProvider {
       max_tokens: 1024
     };
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), this.timeout);
-
     try {
-      const response = await fetch(url, {
+      // Use Obsidian's requestUrl to bypass CORS
+      const response = await requestUrl({
+        url,
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'x-api-key': this.apiKey,
-          'anthropic-version': this.version,
-          'anthropic-dangerous-direct-browser-access': 'true'
+          'anthropic-version': this.version
         },
         body: JSON.stringify(request),
-        signal: controller.signal
+        timeout: this.timeout
       });
 
-      clearTimeout(timeoutId);
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error?.message || `HTTP ${response.status}`);
+      if (response.status < 200 || response.status >= 300) {
+        let errorMessage = `HTTP ${response.status}`;
+        try {
+          const errorData = response.json;
+          errorMessage = errorData?.error?.message || errorMessage;
+        } catch {}
+        throw new Error(errorMessage);
       }
 
-      const data: ClaudeResponse = await response.json();
+      const data: ClaudeResponse = response.json;
 
       if (data.error) {
         throw new Error(data.error.message);
@@ -126,15 +127,9 @@ export class ClaudeProvider {
         }
       };
     } catch (error) {
-      clearTimeout(timeoutId);
-
       if (error instanceof Error) {
-        if (error.name === 'AbortError') {
-          throw new Error('Request timeout');
-        }
         throw error;
       }
-
       throw new Error('Unknown error occurred');
     }
   }

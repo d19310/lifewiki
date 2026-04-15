@@ -1,4 +1,4 @@
-import { App, Notice, Plugin, PluginManifest, TFile } from 'obsidian';
+import { App, Notice, Plugin, PluginManifest } from 'obsidian';
 import { LifeWikiSettingTab, LifeWikiSettings, DEFAULT_SETTINGS, createAIProvider } from './settings';
 import { BlockEditorView, VIEW_TYPE_BLOCK_EDITOR } from './views/block-editor';
 import { EntityManager } from './entities/manager';
@@ -8,7 +8,7 @@ import type { AIProvider } from './ai/provider';
 
 export default class LifeWikiPlugin extends Plugin {
 	settings!: LifeWikiSettings;
-	settingTab!: LifeWikiSettingTab;
+	settingTab?: LifeWikiSettingTab;
 	entityManager!: EntityManager;
 	aiAnalyzer!: AIAnalyzer;
 	aiProvider!: AIProvider;
@@ -21,43 +21,65 @@ export default class LifeWikiPlugin extends Plugin {
 	async onload() {
 		console.log('LifeWiki: loading...');
 
-		await this.loadSettings();
-		this.initAIProvider();
-		this.entityManager = new EntityManager(this.app);
-		this.aiAnalyzer = new AIAnalyzer(this.aiProvider, this.entityManager);
-		this.skillExecutor = createSkillExecutor(this.app, this.aiProvider, this.entityManager);
+		// Check if we've already added a tab for this plugin (across instances)
+		const appWithTab = (this.app as any).lifewikiTab;
 
-		this.settingTab = new LifeWikiSettingTab(this.app, this);
-		this.addSettingTab(this.settingTab);
+		if (appWithTab) {
+			// Reuse existing tab
+			this.settingTab = appWithTab;
+		} else {
+			// Create and register new tab
+			this.settingTab = new LifeWikiSettingTab(this.app, this);
+			(this.app as any).lifewikiTab = this.settingTab;
+			this.addSettingTab(this.settingTab);
+		}
 
-		this.registerView(VIEW_TYPE_BLOCK_EDITOR, (leaf) => new BlockEditorView(leaf, this));
+		try {
+			await this.loadSettings();
+			this.initAIProvider();
+			this.entityManager = new EntityManager(this.app);
+			this.aiAnalyzer = new AIAnalyzer(this.aiProvider, this.entityManager);
+			this.skillExecutor = createSkillExecutor(this.app, this.aiProvider, this.entityManager);
 
-		this.addRibbonIcon('document', '打开日记', () => {
-			this.openBlockEditor();
-		});
+			this.registerView(VIEW_TYPE_BLOCK_EDITOR, (leaf) => new BlockEditorView(leaf, this));
 
-		this.addCommand({
-			id: 'open-block-editor',
-			name: '打开日记编辑器',
-			callback: () => {
+			this.addRibbonIcon('document', '打开日记', () => {
 				this.openBlockEditor();
-			}
-		});
+			});
 
-		this.addCommand({
-			id: 'open-settings',
-			name: '打开设置',
-			callback: () => {
-				(this.app as any).setting.open();
-			}
-		});
+			this.addCommand({
+				id: 'open-block-editor',
+				name: '打开日记编辑器',
+				callback: () => {
+					this.openBlockEditor();
+				}
+			});
 
-		new Notice('LifeWiki 已加载');
-		console.log('LifeWiki: loaded');
+			this.addCommand({
+				id: 'open-settings',
+				name: '打开设置',
+				callback: () => {
+					(this.app as any).setting.open();
+				}
+			});
+
+			new Notice('LifeWiki 已加载');
+			console.log('LifeWiki: loaded successfully');
+		} catch (e) {
+			console.error('LifeWiki: Failed to load', e);
+			new Notice('LifeWiki 加载失败: ' + (e as Error).message);
+		}
 	}
 
 	onunload() {
-		console.log('LifeWiki: unloaded');
+		console.log('LifeWiki: unloading...');
+		// Clean up local reference but keep app-level reference for reuse
+		if (this.settingTab) {
+			if (typeof this.settingTab.hide === 'function') {
+				this.settingTab.hide();
+			}
+			this.settingTab = undefined;
+		}
 	}
 
 	async loadSettings() {
@@ -132,12 +154,5 @@ export default class LifeWikiPlugin extends Plugin {
 
 	getSkillExecutor(): SkillExecutor {
 		return this.skillExecutor;
-	}
-
-	async reloadAIProvider() {
-		this.initAIProvider();
-		this.aiAnalyzer = new AIAnalyzer(this.aiProvider, this.entityManager);
-		this.skillExecutor = createSkillExecutor(this.app, this.aiProvider, this.entityManager);
-		new Notice('LifeWiki: AI provider 已重新加载');
 	}
 }

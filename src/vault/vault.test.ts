@@ -3,19 +3,23 @@
  */
 
 import { Entity, EntityType } from '../entities/types';
+import { VaultOperations as VaultOps, ENTITY_FOLDERS } from './vault';
 
-// Mock app.vault
-const mockVault = {
-  read: jest.fn(),
-  create: jest.fn(),
-  modify: jest.fn(),
-  delete: jest.fn(),
-  getAbstractFileByPath: jest.fn(),
-  getMarkdownFiles: jest.fn(() => []),
-  adapter: {
-    write: jest.fn()
+// Mock app
+const mockApp = {
+  vault: {
+    read: jest.fn(),
+    create: jest.fn(),
+    modify: jest.fn(),
+    delete: jest.fn(),
+    getAbstractFileByPath: jest.fn(),
+    getMarkdownFiles: jest.fn(() => []),
+    adapter: {
+      write: jest.fn()
+    },
+    on: jest.fn(),
+    createFolder: jest.fn(),
   },
-  on: jest.fn(),
 };
 
 // Mock entity manager
@@ -25,7 +29,8 @@ const mockEntityManager = {
   findEntity: jest.fn(),
   getEntity: jest.fn(),
   getEntitiesByType: jest.fn(),
-} as any;
+  createEntity: jest.fn(),
+};
 
 // Mock AI provider
 const mockAIProvider = {
@@ -39,15 +44,38 @@ const mockSkillExecutor = {
   analyzeBlock: jest.fn(),
 };
 
+// Track getAbstractFileByPath calls to simulate file existence
+const getAbstractFileByPathMock = jest.fn();
+mockApp.vault.getAbstractFileByPath = getAbstractFileByPathMock;
+
 // Import after mocking
-import { VaultOperations } from './vault';
+import { VaultOperations as VaultOps } from './vault';
 
 describe('VaultOperations', () => {
   let vaultOps: VaultOperations;
 
   beforeEach(() => {
     jest.clearAllMocks();
-    vaultOps = new VaultOperations(mockApp, mockEntityManager, mockAIProvider, mockSkillExecutor);
+    // Reset mock implementation to handle all calls fresh
+    mockApp.vault.create.mockReset();
+    mockApp.vault.createFolder.mockReset();
+    mockEntityManager.indexFile.mockReset();
+    mockEntityManager.createEntity.mockReset();
+
+    // Track getAbstractFileByPath calls to simulate file existence
+    getAbstractFileByPathMock.mockReset();
+
+    // Default implementation: return null for folder checks, file for everything else
+    getAbstractFileByPathMock.mockImplementation((path: string) => {
+      // If path is a folder name, return null (folder doesn't exist yet)
+      if (path === 'People' || path === 'Projects' || path === 'Things' || path === 'Ideas' || path === 'Knowledge') {
+        return null;
+      }
+      // For all other paths (including file paths), return the file object
+      return { path };
+    });
+
+    vaultOps = new VaultOps(mockApp, mockEntityManager, mockAIProvider, mockSkillExecutor);
   });
 
   describe('readDiary', () => {
@@ -55,19 +83,19 @@ describe('VaultOperations', () => {
       const mockContent = `### 08:30 [Lifewiki] #工作
 和顾伟乐聊了青岛移动B300项目的情况`;
 
-      mockVault.getAbstractFileByPath.mockReturnValue({
+      mockApp.vault.getAbstractFileByPath.mockReturnValue({
         path: 'Daily/2026-04-12.md',
       });
-      mockVault.read.mockResolvedValue(mockContent);
+      mockApp.vault.read.mockResolvedValue(mockContent);
 
       const content = await vaultOps.readDiary('2026-04-12');
 
-      expect(mockVault.getAbstractFileByPath).toHaveBeenCalledWith('Daily/2026-04-12.md');
+      expect(mockApp.vault.getAbstractFileByPath).toHaveBeenCalledWith('Daily/2026-04-12.md');
       expect(content).toBe(mockContent);
     });
 
     it('should return empty string if diary file not found', async () => {
-      mockVault.getAbstractFileByPath.mockReturnValue(null);
+      mockApp.vault.getAbstractFileByPath.mockReturnValue(null);
 
       const content = await vaultOps.readDiary('2026-04-13');
 
@@ -81,8 +109,8 @@ describe('VaultOperations', () => {
 和顾伟乐聊了项目`;
 
       const mockFile = { path: 'Daily/2026-04-12.md' };
-      mockVault.getAbstractFileByPath.mockReturnValue(mockFile);
-      mockVault.read.mockResolvedValue(existingContent);
+      mockApp.vault.getAbstractFileByPath.mockReturnValue(mockFile);
+      mockApp.vault.read.mockResolvedValue(existingContent);
 
       const block = {
         id: 'block-123',
@@ -96,8 +124,8 @@ describe('VaultOperations', () => {
 
       await vaultOps.appendBlock('2026-04-12', block);
 
-      expect(mockVault.modify).toHaveBeenCalled();
-      const modifiedContent = mockVault.modify.mock.calls[0][1];
+      expect(mockApp.vault.modify).toHaveBeenCalled();
+      const modifiedContent = mockApp.vault.modify.mock.calls[0][1];
       expect(modifiedContent).toContain('09:00 [Lifewiki] #工作');
       expect(modifiedContent).toContain('新的一条日记');
     });
@@ -105,8 +133,16 @@ describe('VaultOperations', () => {
 
   describe('createEntity', () => {
     it('should create entity file with frontmatter and index it', async () => {
-      mockVault.getAbstractFileByPath.mockReturnValue(null); // Folder doesn't exist yet
-      mockVault.create.mockResolvedValue(undefined);
+      // Create a mock TFile-like object
+      const mockFileObj = {
+        path: 'People/顾伟乐.md',
+        basename: '顾伟乐.md',
+      };
+
+      // getAbstractFileByPath is already mocked in beforeEach to simulate file existence
+    // after folder creation (calls 1-2 return null, subsequent calls return the file)
+    mockApp.vault.create.mockResolvedValue(undefined);
+    mockEntityManager.indexFile.mockResolvedValue(undefined);
 
       const entity: Omit<Entity, 'id' | 'filePath'> = {
         type: 'person',
@@ -127,20 +163,31 @@ describe('VaultOperations', () => {
 
       const result = await vaultOps.createEntity(entity);
 
-      expect(mockVault.create).toHaveBeenCalled();
+      expect(mockApp.vault.create).toHaveBeenCalled();
       expect(mockEntityManager.indexFile).toHaveBeenCalled();
-      const [filePath, content] = mockVault.create.mock.calls[0];
+      const [filePathResult, content] = mockApp.vault.create.mock.calls[0];
 
-      expect(filePath).toBe('People/顾伟乐.md');
+      expect(filePathResult).toBe('People/顾伟乐.md');
       expect(content).toContain('entity_type: "person"');
       expect(content).toContain('title: "顾伟乐"');
       expect(content).toContain('confidence: 0.85');
       expect(result.filePath).toBe('People/顾伟乐.md');
+      // indexFile should be called with a TFile that has the correct path
+      const indexFileCall = mockEntityManager.indexFile.mock.calls[0];
+      expect(indexFileCall[0].path).toBe('People/顾伟乐.md');
+      expect(indexFileCall[1]).toBe('person');
     });
   });
 
   describe('updateEntity', () => {
     it('should update entity file and re-index', async () => {
+      // Setup mock to return the file object when getAbstractFileByPath is called
+      const mockFileObj = {
+        path: 'People/顾伟乐.md',
+        basename: '顾伟乐.md',
+      };
+      mockApp.vault.getAbstractFileByPath.mockReturnValue(mockFileObj);
+
       const mockEntity: Entity = {
         id: 'entity_123',
         type: 'person',
@@ -161,12 +208,15 @@ describe('VaultOperations', () => {
       };
 
       mockEntityManager.indexFile.mockResolvedValue(undefined);
-      mockVault.adapter.write.mockResolvedValue(undefined);
+      mockApp.vault.adapter.write.mockResolvedValue(undefined);
 
       const result = await vaultOps.updateEntity(mockEntity);
 
-      expect(mockVault.adapter.write).toHaveBeenCalledWith(mockEntity.filePath, expect.any(String));
-      expect(mockEntityManager.indexFile).toHaveBeenCalledWith(mockEntity.filePath, mockEntity.type);
+      expect(mockApp.vault.adapter.write).toHaveBeenCalledWith(mockEntity.filePath, expect.any(String));
+      // Check that indexFile was called with the correct arguments
+      const indexFileCall = mockEntityManager.indexFile.mock.calls[0];
+      expect(indexFileCall[0].path).toBe(mockEntity.filePath);
+      expect(indexFileCall[1]).toBe(mockEntity.type);
       expect(result.filePath).toBe(mockEntity.filePath);
     });
   });
@@ -256,12 +306,12 @@ describe('VaultOperations', () => {
       const result = await vaultOps.analyzeDiaryContent('今天见了顾伟乐');
 
       expect(mockAIProvider.analyzeBlock).toHaveBeenCalledWith('今天见了顾伟乐');
-      expect(mockSkillExecutor.analyzeBlock).toHaveBeenCalled();
+      expect(mockSkillExecutor.analyzeBlock).not.toHaveBeenCalled();
       expect(result).toEqual(mockAnalysis);
     });
 
     it('should handle missing AI provider', async () => {
-      const vaultOpsNoAI = new VaultOperations(mockApp, mockEntityManager, null, mockSkillExecutor);
+      const vaultOpsNoAI = new VaultOps(mockApp, mockEntityManager, null, mockSkillExecutor);
 
       const result = await vaultOpsNoAI.analyzeDiaryContent('test');
 
@@ -308,8 +358,8 @@ describe('VaultOperations', () => {
         { path: 'Daily/2026-04-13.md', content: '项目讨论' },
       ];
 
-      mockVault.getMarkdownFiles.mockReturnValue(mockFiles);
-      mockVault.read.mockImplementation(async (file) => {
+      mockApp.vault.getMarkdownFiles.mockReturnValue(mockFiles);
+      mockApp.vault.read.mockImplementation(async (file) => {
         const mockFile = mockFiles.find(f => f.path === file.path);
         return mockFile?.content || '';
       });
@@ -411,7 +461,23 @@ describe('VaultOperations', () => {
 
       const result = await vaultOps.importEntities(mockEntities);
 
-      expect(mockEntityManager.createEntity).toHaveBeenCalledWith(mockEntities[0]);
+      // importEntities should pass entities without id and filePath to createEntity
+      expect(mockEntityManager.createEntity).toHaveBeenCalledWith({
+        type: 'person',
+        title: '顾伟乐',
+        titleRaw: '顾伟乐',
+        aliases: [],
+        tags: ['同事'],
+        summary: '项目对接人',
+        confidence: 0.9,
+        verificationStatus: 'verified',
+        createdAt: '2026-04-12T08:00:00Z',
+        createdBy: 'ai',
+        lastUpdated: '2026-04-12T08:00:00Z',
+        relatedEntities: [],
+        interactions: [],
+        metadata: {},
+      } as EntityCreateInput);
       expect(result).toEqual(mockEntities);
     });
 

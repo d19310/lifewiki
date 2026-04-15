@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Test vault
+test-lifewiki-vault/.obsidian/plugins/lifewiki/
+
+# OS files
+.DS_Store
+*.swp
+
+# IDE
+.idea/
+.vscode/
+
+# Logs
+*.log

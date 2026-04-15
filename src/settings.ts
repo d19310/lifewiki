@@ -3,11 +3,12 @@ import { DashScopeProvider } from './ai/dashscope';
 import { OllamaProvider } from './ai/ollama';
 import { OpenAIProvider } from './ai/openai-provider';
 import { ClaudeProvider } from './ai/claude-provider';
+import { MiniMaxProvider } from './ai/minimax';
 import type { AIProvider } from './ai/provider';
 import type LifeWikiPlugin from './main';
 
 export interface LifeWikiSettings {
-	provider: 'dashscope' | 'openai' | 'claude' | 'ollama';
+	provider: 'dashscope' | 'openai' | 'claude' | 'ollama' | 'minimax';
 	apiKey: string;
 	baseUrl: string;
 	model: string;
@@ -55,6 +56,7 @@ export class LifeWikiSettingTab extends SettingTab {
 				dropdown.addOption('openai', 'OpenAI');
 				dropdown.addOption('claude', 'Claude');
 				dropdown.addOption('ollama', 'Ollama (本地)');
+				dropdown.addOption('minimax', 'MiniMax');
 				dropdown.setValue(this.plugin.settings.provider)
 					.onChange(async (value) => {
 						this.plugin.settings.provider = value as any;
@@ -70,6 +72,9 @@ export class LifeWikiSettingTab extends SettingTab {
 								break;
 							case 'ollama':
 								this.plugin.settings.baseUrl = 'http://localhost:11434';
+								break;
+							case 'minimax':
+								this.plugin.settings.baseUrl = 'https://api.minimaxi.com/v1';
 								break;
 						}
 						await this.plugin.saveSettings();
@@ -154,6 +159,13 @@ export class LifeWikiSettingTab extends SettingTab {
 									model: settings.model
 								});
 								break;
+							case 'minimax':
+								provider = new MiniMaxProvider({
+									apiKey: settings.apiKey,
+									baseUrl: settings.baseUrl,
+									model: settings.model
+								});
+								break;
 							default:
 								new Notice('未知提供商');
 								return;
@@ -217,6 +229,12 @@ export function createAIProvider(settings: LifeWikiSettings): AIProvider {
 			});
 		case 'claude':
 			return new ClaudeProvider({
+				apiKey: settings.apiKey,
+				baseUrl: settings.baseUrl,
+				model: settings.model
+			});
+		case 'minimax':
+			return new MiniMaxProvider({
 				apiKey: settings.apiKey,
 				baseUrl: settings.baseUrl,
 				model: settings.model

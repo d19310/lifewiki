@@ -1,5 +1,5 @@
 import { App, TFile, Vault, normalizePath } from 'obsidian';
-import { Entity, Block, EntityType } from '../entities/types';
+import { Entity, Block, EntityType, EntityCreateInput } from '../entities/types';
 import { EntityManager } from '../entities/manager';
 
 const DIARY_FOLDER = 'Daily';
@@ -16,12 +16,29 @@ function isTFile(file: unknown): file is TFile {
   return file !== null && typeof file === 'object' && 'path' in file;
 }
 
+interface AIProvider {
+  analyzeBlock(content: string): Promise<any>;
+}
+
+interface SkillExecutor {
+  createNewEntitiesWithSkills(analysis: any, entityManager: EntityManager, app: App): Promise<any[]>;
+  analyzeBlock(block: { content: string; timestamp: string }): Promise<void>;
+}
+
+export const ENTITY_FOLDERS: Record<EntityType, string> = {
+  person: 'People',
+  project: 'Projects',
+  thing: 'Things',
+  idea: 'Ideas',
+  knowledge: 'Knowledge',
+};
+
 export class VaultOperations {
   constructor(
     private app: App,
     private entityManager: EntityManager,
-    private aiProvider: any,
-    private skillExecutor: any
+    private aiProvider: AIProvider | null,
+    private skillExecutor: SkillExecutor
   ) {}
 
   async readDiary(date: string): Promise<string> {
@@ -56,7 +73,7 @@ export class VaultOperations {
     return `### ${block.timestamp}${source}${category}\n${block.content}`;
   }
 
-  async createEntity(entity: Omit<Entity, 'id' | 'filePath'>): Promise<{ filePath: string }> {
+  async createEntity(entity: EntityCreateInput): Promise<{ filePath: string }> {
     const folder = ENTITY_FOLDERS[entity.type];
     const fileName = `${entity.title}.md`;
     const filePath = `${folder}/${fileName}`;
@@ -118,7 +135,7 @@ export class VaultOperations {
   }
 
   async analyzeDiaryContent(content: string): Promise<any> {
-    if (!this.aiProvider || !this.aiProvider.analyzeBlock) {
+    if (!this.aiProvider) {
       return {
         entities: { people: [], projects: [], things: [], ideas: [], knowledge: [] },
         needsConfirmation: [],

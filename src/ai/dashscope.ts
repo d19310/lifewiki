@@ -3,6 +3,7 @@
  * LLM Provider implementation for 阿里百炼 API
  */
 
+import { requestUrl } from 'obsidian';
 import { ChatMessage, ChatResponse, AnalysisResult, EntityPreview } from '../entities/types';
 
 export interface DashScopeConfig {
@@ -88,28 +89,29 @@ export class DashScopeProvider {
       max_tokens: this.maxTokens
     };
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), this.timeout);
-
     try {
-      const response = await fetch(url, {
+      // Use Obsidian's requestUrl to bypass CORS
+      const response = await requestUrl({
+        url,
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${this.apiKey}`
         },
         body: JSON.stringify(request),
-        signal: controller.signal
+        timeout: this.timeout
       });
 
-      clearTimeout(timeoutId);
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error?.message || `HTTP ${response.status}`);
+      if (response.status < 200 || response.status >= 300) {
+        let errorMessage = `HTTP ${response.status}`;
+        try {
+          const errorData = response.json;
+          errorMessage = errorData?.error?.message || errorMessage;
+        } catch {}
+        throw new Error(errorMessage);
       }
 
-      const data: DashScopeResponse = await response.json();
+      const data: DashScopeResponse = response.json;
 
       if (data.error) {
         throw new Error(data.error.message);
@@ -124,15 +126,9 @@ export class DashScopeProvider {
         }
       };
     } catch (error) {
-      clearTimeout(timeoutId);
-
       if (error instanceof Error) {
-        if (error.name === 'AbortError') {
-          throw new Error('Request timeout');
-        }
         throw error;
       }
-
       throw new Error('Unknown error occurred');
     }
   }

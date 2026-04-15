@@ -1,56 +1,77 @@
 /**
- * Ollama Provider
- * LLM Provider implementation for Ollama local models
+ * MiniMax Provider
+ * LLM Provider implementation for MiniMax API
  */
 
 import { requestUrl } from 'obsidian';
 import { ChatMessage, ChatResponse, AnalysisResult, EntityPreview } from '../entities/types';
 
-export interface OllamaConfig {
+export interface MiniMaxConfig {
+  apiKey: string;
   baseUrl?: string;
   model?: string;
   timeout?: number;
 }
 
-interface OllamaRequest {
+interface MiniMaxRequest {
   model: string;
   messages: { role: string; content: string }[];
-  stream?: boolean;
+  temperature?: number;
+  max_tokens?: number;
 }
 
-interface OllamaResponse {
-  message: {
-    role: string;
-    content: string;
+interface MiniMaxResponse {
+  id: string;
+  choices: {
+    message: {
+      role: string;
+      content: string;
+    };
+    finish_reason: string;
+  }[];
+  usage: {
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
   };
-  done: boolean;
+  error?: {
+    message: string;
+    type: string;
+    code: string;
+  };
 }
 
-const DEFAULT_MODEL = 'llama3';
-const DEFAULT_BASE_URL = 'http://localhost:11434';
-const DEFAULT_TIMEOUT = 60000;
+const DEFAULT_MODEL = 'MiniMax-M2.7';
+const DEFAULT_BASE_URL = 'https://api.minimaxi.com/v1';
+const DEFAULT_TIMEOUT = 30000;
 
-export class OllamaProvider {
+export class MiniMaxProvider {
+  private apiKey: string;
   private baseUrl: string;
   private model: string;
   private timeout: number;
 
-  constructor(config: OllamaConfig = {}) {
+  constructor(config: MiniMaxConfig) {
+    if (!config.apiKey) {
+      throw new Error('API key is required for MiniMax');
+    }
+    this.apiKey = config.apiKey;
     this.baseUrl = config.baseUrl || DEFAULT_BASE_URL;
     this.model = config.model || DEFAULT_MODEL;
     this.timeout = config.timeout || DEFAULT_TIMEOUT;
   }
 
   async chat(messages: ChatMessage[]): Promise<ChatResponse> {
-    const url = `${this.baseUrl}/api/chat`;
+    const url = `${this.baseUrl}/chat/completions`;
 
-    const request: OllamaRequest = {
+    const request: MiniMaxRequest = {
       model: this.model,
       messages: messages.map(m => ({
         role: m.role,
         content: m.content
       })),
-      stream: false
+      temperature: 0.7,
+      max_tokens: 1000
     };
 
     try {
@@ -59,24 +80,34 @@ export class OllamaProvider {
         url,
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${this.apiKey}`
         },
         body: JSON.stringify(request),
         timeout: this.timeout
       });
 
       if (response.status < 200 || response.status >= 300) {
-        throw new Error(`HTTP ${response.status}`);
+        let errorMessage = `HTTP ${response.status}`;
+        try {
+          const errorData = response.json;
+          errorMessage = errorData?.error?.message || errorMessage;
+        } catch {}
+        throw new Error(errorMessage);
       }
 
-      const data: OllamaResponse = response.json;
+      const data: MiniMaxResponse = response.json;
+
+      if (data.error) {
+        throw new Error(data.error.message);
+      }
 
       return {
-        content: data.message.content || '',
+        content: data.choices[0]?.message?.content || '',
         usage: {
-          promptTokens: 0, // Ollama doesn't provide token counts
-          completionTokens: 0,
-          totalTokens: 0
+          promptTokens: data.usage?.prompt_tokens || 0,
+          completionTokens: data.usage?.completion_tokens || 0,
+          totalTokens: data.usage?.total_tokens || 0
         }
       };
     } catch (error) {
@@ -106,7 +137,7 @@ JSON格式：
 {
   "category": "工作",
   "entities": {
-    "people": [{"Name": "姓名", "confidence": 0.9, "context": "上下文"}],
+    "people": [{"name": "姓名", "confidence": 0.9, "context": "上下文"}],
     "projects": [],
     "things": [],
     "ideas": [],
@@ -143,7 +174,7 @@ JSON格式：
         category = ['工作', '个人'].includes(json.category) ? json.category : '待确认';
         entities = {
           people: (json.entities?.people || []).map((e: any) => ({
-            name: e.Name || e.name,
+            name: e.name,
             type: 'person' as const,
             confidence: e.confidence || 0.5,
             context: e.context || '',
@@ -151,7 +182,7 @@ JSON格式：
             newEntity: true
           })),
           projects: (json.entities?.projects || []).map((e: any) => ({
-            name: e.Name || e.name,
+            name: e.name,
             type: 'project' as const,
             confidence: e.confidence || 0.5,
             context: e.context || '',
@@ -159,7 +190,7 @@ JSON格式：
             newEntity: true
           })),
           things: (json.entities?.things || []).map((e: any) => ({
-            name: e.Name || e.name,
+            name: e.name,
             type: 'thing' as const,
             confidence: e.confidence || 0.5,
             context: e.context || '',
@@ -167,7 +198,7 @@ JSON格式：
             newEntity: true
           })),
           ideas: (json.entities?.ideas || []).map((e: any) => ({
-            name: e.Name || e.name,
+            name: e.name,
             type: 'idea' as const,
             confidence: e.confidence || 0.5,
             context: e.context || '',
@@ -175,7 +206,7 @@ JSON格式：
             newEntity: true
           })),
           knowledge: (json.entities?.knowledge || []).map((e: any) => ({
-            name: e.Name || e.name,
+            name: e.name,
             type: 'knowledge' as const,
             confidence: e.confidence || 0.5,
             context: e.context || '',
@@ -201,7 +232,7 @@ JSON格式：
   }
 
   isReady(): boolean {
-    return true;
+    return !!this.apiKey;
   }
 
   private generateId(): string {

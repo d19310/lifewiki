@@ -6,6 +6,8 @@
 import { ItemView, WorkspaceLeaf, TFile } from 'obsidian';
 import type LifeWikiPlugin from '../main';
 import { Block, AnalysisResult } from '../entities/types';
+import { generateConfirmationItems, createEntityFromConfirmation, getEntityTypeLabel, getEntityTypeEmoji, type ConfirmationItem } from './confirmation-dialog';
+import { generateAnalysisSummary, getEntityEmoji, type AnalysisSummary } from './analysis-panel';
 
 export const VIEW_TYPE_BLOCK_EDITOR = 'lifewiki-block-editor';
 
@@ -24,6 +26,9 @@ export class BlockEditorView extends ItemView {
 	private currentDate: string;
 	private inputValue: string = '';
 	private isLoading: boolean = false;
+	private analysisPanelEl: HTMLElement | null = null;
+	private currentAnalysisSummary: AnalysisSummary | null = null;
+	private confirmationItems: ConfirmationItem[] = [];
 
 	constructor(leaf: WorkspaceLeaf, plugin: LifeWikiPlugin) {
 		super(leaf);
@@ -66,7 +71,107 @@ export class BlockEditorView extends ItemView {
 	}
 
 	private createAnalysisPanel(container: HTMLElement) {
-		// Empty panel - no text
+		this.analysisPanelEl = container;
+
+		// Header
+		const header = container.createEl('div', {
+			attr: { style: 'font-weight: 600; font-size: 14px; margin-bottom: 16px;' }
+		});
+		header.createEl('span', { text: '🔍 ' });
+		header.createEl('span', { text: 'AI 分析' });
+
+		// Stats summary
+		const statsEl = container.createEl('div', {
+			cls: 'lifewiki-stats',
+			attr: { style: 'font-size: 12px; color: var(--text-muted); margin-bottom: 16px;' }
+		});
+
+		// Entity sections
+		const sections: Array<{ key: keyof AnalysisSummary; emoji: string }> = [
+			{ key: 'people', emoji: '👤' },
+			{ key: 'projects', emoji: '📋' },
+			{ key: 'things', emoji: '💡' },
+			{ key: 'ideas', emoji: '💭' },
+			{ key: 'knowledge', emoji: '📚' }
+		];
+
+		for (const section of sections) {
+			const sectionEl = container.createEl('div', {
+				cls: `lifewiki-section-${section.key}`,
+				attr: { style: 'margin-bottom: 12px;' }
+			});
+
+			sectionEl.createEl('div', {
+				text: `${section.emoji} ${getEntityEmojiLabel(section.key)}`,
+				attr: { style: 'font-size: 12px; font-weight: 500; color: var(--text-muted); margin-bottom: 4px;' }
+			});
+
+			sectionEl.createEl('div', {
+				cls: `lifewiki-${section.key}-list`,
+				attr: { style: 'font-size: 13px;' }
+			});
+		}
+
+		this.renderAnalysisPanel();
+	}
+
+	private getEntityEmojiLabel(key: string): string {
+		const labels: Record<string, string> = {
+			people: '人脉',
+			projects: '项目',
+			things: '物品',
+			ideas: '想法',
+			knowledge: '知识'
+		};
+		return labels[key] || key;
+	}
+
+	private renderAnalysisPanel() {
+		if (!this.analysisPanelEl) return;
+
+		// Update stats
+		const statsEl = this.analysisPanelEl.querySelector('.lifewiki-stats');
+		if (statsEl && this.currentAnalysisSummary) {
+			const { totalEntities, archivedCount, newCount } = this.currentAnalysisSummary;
+			statsEl.textContent = `共 ${totalEntities} 个实体 | ${archivedCount} 已归档 | ${newCount} 待确认`;
+		} else if (statsEl) {
+			statsEl.textContent = '暂无分析数据';
+		}
+
+		// Update entity lists
+		const sections: (keyof AnalysisSummary)[] = ['people', 'projects', 'things', 'ideas', 'knowledge'];
+		for (const section of sections) {
+			const listEl = this.analysisPanelEl.querySelector(`.lifewiki-${section}-list`);
+			if (!listEl) continue;
+
+			listEl.empty();
+
+			if (!this.currentAnalysisSummary || this.currentAnalysisSummary[section].length === 0) {
+				listEl.createEl('div', {
+					text: '—',
+					attr: { style: 'color: var(--text-muted); font-size: 12px;' }
+				});
+				continue;
+			}
+
+			for (const entity of this.currentAnalysisSummary[section]) {
+				const itemEl = listEl.createEl('div', {
+					attr: {
+						style: `padding: 4px 0; border-bottom: 1px solid var(--background-modifier-border); ${entity.newEntity ? 'font-weight: 500;' : ''}`
+					}
+				});
+				itemEl.createEl('span', { text: entity.name });
+				itemEl.createEl('span', {
+					text: ` (${entity.statusLabel})`,
+					attr: { style: `font-size: 11px; color: ${entity.newEntity ? 'var(--text-accent)' : 'var(--text-muted)'};` }
+				});
+			}
+		}
+	}
+
+	private updateAnalysisSummary(result: AnalysisResult) {
+		this.currentAnalysisSummary = generateAnalysisSummary(result);
+		this.renderAnalysisPanel();
 	}
 
 	private createBlockEditor(container: HTMLElement) {
@@ -306,8 +411,12 @@ export class BlockEditorView extends ItemView {
 				}
 			}
 
+			// Update analysis panel
+			this.updateAnalysisSummary(result);
+
 			this.renderBlocks();
 
+			// Show confirmation dialog if needed
 			if (result.needsConfirmation && result.needsConfirmation.length > 0) {
 				this.showConfirmationDialog(result);
 			}
@@ -317,7 +426,131 @@ export class BlockEditorView extends ItemView {
 	}
 
 	private showConfirmationDialog(result: AnalysisResult) {
-		console.log('LifeWiki: Entities need confirmation:', result.needsConfirmation);
+		const items = generateConfirmationItems(result);
+		if (items.length === 0) return;
+
+		this.confirmationItems = items;
+
+		// Create modal overlay
+		const overlay = document.createElement('div');
+		overlay.className = 'lifewiki-modal-overlay';
+		overlay.setAttribute('style', `
+			position: fixed;
+			top: 0;
+			left: 0;
+			right: 0;
+			bottom: 0;
+			background: rgba(0, 0, 0, 0.5);
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			z-index: 1000;
+		`);
+
+		// Modal content
+		const modal = document.createElement('div');
+		modal.className = 'lifewiki-modal';
+		modal.setAttribute('style', `
+			background: var(--modal-background);
+			border-radius: 12px;
+			padding: 24px;
+			max-width: 400px;
+			width: 90%;
+			max-height: 80vh;
+			overflow-y: auto;
+			box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
+		`);
+
+		// Header
+		const header = modal.createEl('div', {
+			text: '🤔 AI 识别到新实体',
+			attr: { style: 'font-size: 16px; font-weight: 600; margin-bottom: 16px;' }
+		});
+
+		// Entity list
+		const list = modal.createEl('div', {
+			attr: { style: 'margin-bottom: 20px;' }
+		});
+
+		for (const item of items) {
+			const itemEl = list.createEl('div', {
+				attr: { style: 'padding: 12px; background: var(--background-secondary); border-radius: 8px; margin-bottom: 8px;' }
+			});
+
+			const emoji = item.entityType === 'category' ? '📝' : getEntityTypeEmoji(item.entityType as any);
+			itemEl.createEl('div', {
+				text: `${emoji} ${item.name}`,
+				attr: { style: 'font-weight: 500; margin-bottom: 4px;' }
+			});
+			itemEl.createEl('div', {
+				text: item.context,
+				attr: { style: 'font-size: 12px; color: var(--text-muted);' }
+			});
+			if (item.entityType !== 'category') {
+				itemEl.createEl('div', {
+					text: `置信度: ${Math.round(item.confidence * 100)}%`,
+					attr: { style: 'font-size: 11px; color: var(--text-muted); margin-top: 4px;' }
+				});
+			}
+		}
+
+		// Buttons
+		const buttons = modal.createEl('div', {
+			attr: { style: 'display: flex; gap: 12px; justify-content: flex-end;' }
+		});
+
+		const cancelBtn = buttons.createEl('button', {
+			text: '忽略',
+			attr: {
+				type: 'button',
+				style: 'padding: 8px 16px; border-radius: 6px; border: 1px solid var(--background-modifier-border); background: transparent; cursor: pointer;'
+			}
+		});
+
+		const confirmBtn = buttons.createEl('button', {
+			text: '归档',
+			attr: {
+				type: 'button',
+				style: 'padding: 8px 16px; border-radius: 6px; border: none; background: var(--interactive-accent); color: white; cursor: pointer;'
+			}
+		});
+
+		// Event handlers
+		const closeModal = () => {
+			document.body.removeChild(overlay);
+			this.confirmationItems = [];
+		};
+
+		cancelBtn.addEventListener('click', () => {
+			closeModal();
+		});
+
+		confirmBtn.addEventListener('click', async () => {
+			await this.handleEntityConfirmation(items);
+			closeModal();
+		});
+
+		overlay.addEventListener('click', (e) => {
+			if (e.target === overlay) closeModal();
+		});
+
+		document.body.appendChild(overlay);
+	}
+
+	private async handleEntityConfirmation(items: ConfirmationItem[]) {
+		const entityManager = this.plugin.getEntityManager();
+		if (!entityManager) return;
+
+		for (const item of items) {
+			if (item.entityType === 'category') continue; // Skip category for now
+
+			try {
+				const entityInput = createEntityFromConfirmation(item);
+				await entityManager.createEntity(entityInput);
+			} catch (error) {
+				console.error(`LifeWiki: Failed to create entity ${item.name}:`, error);
+			}
+		}
 	}
 
 	private formatDate(date: Date): string {
