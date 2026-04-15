@@ -38,3 +38,6 @@ export class MetadataCache {
 }
 
 export const VIEW_TYPE_BLOCK_EDITOR = 'lifewiki-block-editor';
+
+// Mock requestUrl for HTTP requests
+export const requestUrl = jest.fn();

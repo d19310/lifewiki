@@ -3,13 +3,14 @@
  * TDD tests for 百炼 (DashScope) API provider
  */
 
-import { ChatMessage, AnalysisResult } from '../entities/types';
+import { ChatMessage } from '../entities/types';
+import { requestUrl } from 'obsidian';
 
-// Mock fetch globally for tests
-const mockFetch = jest.fn();
-global.fetch = mockFetch;
+// Mock requestUrl
+jest.mock('obsidian', () => ({
+  requestUrl: jest.fn()
+}));
 
-// These tests import the actual DashScopeProvider
 import { DashScopeProvider } from './dashscope';
 
 describe('DashScopeProvider', () => {
@@ -50,9 +51,9 @@ describe('DashScopeProvider', () => {
 
   describe('chat', () => {
     it('should send messages to DashScope API', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: jest.fn().mockResolvedValue({
+      (requestUrl as jest.Mock).mockResolvedValueOnce({
+        status: 200,
+        json: {
           id: 'chatcmpl-test',
           choices: [{
             message: {
@@ -66,7 +67,7 @@ describe('DashScopeProvider', () => {
             completion_tokens: 20,
             total_tokens: 30
           }
-        })
+        }
       });
 
       const provider = new DashScopeProvider({ apiKey: mockApiKey });
@@ -79,13 +80,13 @@ describe('DashScopeProvider', () => {
       expect(response).toHaveProperty('content');
       expect(response).toHaveProperty('usage');
       expect(response.content).toBe('你好！有什么可以帮助你的吗？');
-      expect(mockFetch).toHaveBeenCalledTimes(1);
+      expect(requestUrl).toHaveBeenCalledTimes(1);
     });
 
     it('should handle system message', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: jest.fn().mockResolvedValue({
+      (requestUrl as jest.Mock).mockResolvedValueOnce({
+        status: 200,
+        json: {
           id: 'chatcmpl-test',
           choices: [{
             message: {
@@ -99,7 +100,7 @@ describe('DashScopeProvider', () => {
             completion_tokens: 10,
             total_tokens: 30
           }
-        })
+        }
       });
 
       const provider = new DashScopeProvider({ apiKey: mockApiKey });
@@ -114,9 +115,9 @@ describe('DashScopeProvider', () => {
     });
 
     it('should handle empty messages', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: jest.fn().mockResolvedValue({
+      (requestUrl as jest.Mock).mockResolvedValueOnce({
+        status: 200,
+        json: {
           id: 'chatcmpl-test',
           choices: [{
             message: {
@@ -130,7 +131,7 @@ describe('DashScopeProvider', () => {
             completion_tokens: 0,
             total_tokens: 0
           }
-        })
+        }
       });
 
       const provider = new DashScopeProvider({ apiKey: mockApiKey });
@@ -143,9 +144,9 @@ describe('DashScopeProvider', () => {
 
   describe('analyzeBlock', () => {
     it('should analyze block content and return structured result', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: jest.fn().mockResolvedValue({
+      (requestUrl as jest.Mock).mockResolvedValueOnce({
+        status: 200,
+        json: {
           id: 'chatcmpl-test',
           choices: [{
             message: {
@@ -170,7 +171,7 @@ describe('DashScopeProvider', () => {
             completion_tokens: 80,
             total_tokens: 130
           }
-        })
+        }
       });
 
       const provider = new DashScopeProvider({ apiKey: mockApiKey });
@@ -187,9 +188,9 @@ describe('DashScopeProvider', () => {
     });
 
     it('should identify people entities', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: jest.fn().mockResolvedValue({
+      (requestUrl as jest.Mock).mockResolvedValueOnce({
+        status: 200,
+        json: {
           id: 'chatcmpl-test',
           choices: [{
             message: {
@@ -214,7 +215,7 @@ describe('DashScopeProvider', () => {
             completion_tokens: 80,
             total_tokens: 130
           }
-        })
+        }
       });
 
       const provider = new DashScopeProvider({ apiKey: mockApiKey });
@@ -229,9 +230,9 @@ describe('DashScopeProvider', () => {
     });
 
     it('should identify project entities', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: jest.fn().mockResolvedValue({
+      (requestUrl as jest.Mock).mockResolvedValueOnce({
+        status: 200,
+        json: {
           id: 'chatcmpl-test',
           choices: [{
             message: {
@@ -256,7 +257,7 @@ describe('DashScopeProvider', () => {
             completion_tokens: 80,
             total_tokens: 130
           }
-        })
+        }
       });
 
       const provider = new DashScopeProvider({ apiKey: mockApiKey });
@@ -270,9 +271,9 @@ describe('DashScopeProvider', () => {
     });
 
     it('should return confidence scores between 0 and 1', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: jest.fn().mockResolvedValue({
+      (requestUrl as jest.Mock).mockResolvedValueOnce({
+        status: 200,
+        json: {
           id: 'chatcmpl-test',
           choices: [{
             message: {
@@ -297,7 +298,7 @@ describe('DashScopeProvider', () => {
             completion_tokens: 80,
             total_tokens: 130
           }
-        })
+        }
       });
 
       const provider = new DashScopeProvider({ apiKey: mockApiKey });
@@ -329,15 +330,15 @@ describe('DashScopeProvider', () => {
     });
 
     it('should handle API errors', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: false,
-        json: jest.fn().mockResolvedValue({
+      (requestUrl as jest.Mock).mockResolvedValueOnce({
+        status: 401,
+        json: {
           error: {
             message: 'Incorrect API key provided',
             type: 'apikey_error',
             code: 401
           }
-        })
+        }
       });
 
       const provider = new DashScopeProvider({ apiKey: 'invalid-key' });
@@ -347,7 +348,7 @@ describe('DashScopeProvider', () => {
     });
 
     it('should handle network errors', async () => {
-      mockFetch.mockRejectedValueOnce(new Error('Network error'));
+      (requestUrl as jest.Mock).mockRejectedValueOnce(new Error('Network error'));
 
       const provider = new DashScopeProvider({
         apiKey: mockApiKey,

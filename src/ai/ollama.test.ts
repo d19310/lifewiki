@@ -3,11 +3,14 @@
  * Tests for Ollama local model provider
  */
 
-import { OllamaProvider } from './ollama';
+import { requestUrl } from 'obsidian';
 
-// Mock fetch globally
-const mockFetch = jest.fn();
-global.fetch = mockFetch;
+// Mock requestUrl
+jest.mock('obsidian', () => ({
+  requestUrl: jest.fn()
+}));
+
+import { OllamaProvider } from './ollama';
 
 describe('OllamaProvider', () => {
   const mockBaseUrl = 'http://localhost:11434';
@@ -41,15 +44,15 @@ describe('OllamaProvider', () => {
 
   describe('chat', () => {
     it('should send messages to Ollama API', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: jest.fn().mockResolvedValue({
+      (requestUrl as jest.Mock).mockResolvedValueOnce({
+        status: 200,
+        json: {
           message: {
             role: 'assistant',
             content: '你好！有什么可以帮助你的吗？'
           },
           done: true
-        })
+        }
       });
 
       const provider = new OllamaProvider({ baseUrl: mockBaseUrl, model: mockModel });
@@ -57,19 +60,19 @@ describe('OllamaProvider', () => {
 
       expect(response).toHaveProperty('content');
       expect(response.content).toBe('你好！有什么可以帮助你的吗？');
-      expect(mockFetch).toHaveBeenCalledTimes(1);
+      expect(requestUrl).toHaveBeenCalledTimes(1);
     });
 
     it('should handle system message', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: jest.fn().mockResolvedValue({
+      (requestUrl as jest.Mock).mockResolvedValueOnce({
+        status: 200,
+        json: {
           message: {
             role: 'assistant',
             content: '好的，我明白了。'
           },
           done: true
-        })
+        }
       });
 
       const provider = new OllamaProvider({ baseUrl: mockBaseUrl, model: mockModel });
@@ -82,15 +85,15 @@ describe('OllamaProvider', () => {
     });
 
     it('should handle empty messages', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: jest.fn().mockResolvedValue({
+      (requestUrl as jest.Mock).mockResolvedValueOnce({
+        status: 200,
+        json: {
           message: {
             role: 'assistant',
             content: ''
           },
           done: true
-        })
+        }
       });
 
       const provider = new OllamaProvider({ baseUrl: mockBaseUrl, model: mockModel });
@@ -102,9 +105,9 @@ describe('OllamaProvider', () => {
 
   describe('analyzeBlock', () => {
     it('should analyze block content and return structured result', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: jest.fn().mockResolvedValue({
+      (requestUrl as jest.Mock).mockResolvedValueOnce({
+        status: 200,
+        json: {
           message: {
             role: 'assistant',
             content: JSON.stringify({
@@ -121,7 +124,7 @@ describe('OllamaProvider', () => {
             })
           },
           done: true
-        })
+        }
       });
 
       const provider = new OllamaProvider({ baseUrl: mockBaseUrl, model: mockModel });
@@ -138,9 +141,9 @@ describe('OllamaProvider', () => {
     });
 
     it('should identify people entities', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: jest.fn().mockResolvedValue({
+      (requestUrl as jest.Mock).mockResolvedValueOnce({
+        status: 200,
+        json: {
           message: {
             role: 'assistant',
             content: JSON.stringify({
@@ -157,7 +160,7 @@ describe('OllamaProvider', () => {
             })
           },
           done: true
-        })
+        }
       });
 
       const provider = new OllamaProvider({ baseUrl: mockBaseUrl, model: mockModel });
@@ -170,15 +173,15 @@ describe('OllamaProvider', () => {
     });
 
     it('should handle parse errors gracefully', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: jest.fn().mockResolvedValue({
+      (requestUrl as jest.Mock).mockResolvedValueOnce({
+        status: 200,
+        json: {
           message: {
             role: 'assistant',
             content: '这不是JSON格式的响应'
           },
           done: true
-        })
+        }
       });
 
       const provider = new OllamaProvider({ baseUrl: mockBaseUrl, model: mockModel });
@@ -195,7 +198,7 @@ describe('OllamaProvider', () => {
 
   describe('error handling', () => {
     it('should handle network errors', async () => {
-      mockFetch.mockRejectedValueOnce(new Error('Network error'));
+      (requestUrl as jest.Mock).mockRejectedValueOnce(new Error('Network error'));
 
       const provider = new OllamaProvider({ baseUrl: 'http://localhost:99999' });
 
@@ -204,9 +207,9 @@ describe('OllamaProvider', () => {
     });
 
     it('should handle HTTP errors', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: false,
-        status: 500
+      (requestUrl as jest.Mock).mockResolvedValueOnce({
+        status: 500,
+        json: {}
       });
 
       const provider = new OllamaProvider({ baseUrl: mockBaseUrl, model: mockModel });

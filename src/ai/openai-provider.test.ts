@@ -3,11 +3,14 @@
  * Tests for OpenAI API provider
  */
 
-import { OpenAIProvider } from './openai-provider';
+import { requestUrl } from 'obsidian';
 
-// Mock fetch globally
-const mockFetch = jest.fn();
-global.fetch = mockFetch;
+// Mock requestUrl
+jest.mock('obsidian', () => ({
+  requestUrl: jest.fn()
+}));
+
+import { OpenAIProvider } from './openai-provider';
 
 describe('OpenAIProvider', () => {
   const mockApiKey = 'sk-test-key';
@@ -41,9 +44,9 @@ describe('OpenAIProvider', () => {
 
   describe('chat', () => {
     it('should send messages to OpenAI API', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: jest.fn().mockResolvedValue({
+      (requestUrl as jest.Mock).mockResolvedValueOnce({
+        status: 200,
+        json: {
           id: 'chatcmpl-test',
           choices: [{
             message: {
@@ -57,7 +60,7 @@ describe('OpenAIProvider', () => {
             completion_tokens: 20,
             total_tokens: 30
           }
-        })
+        }
       });
 
       const provider = new OpenAIProvider({ apiKey: mockApiKey });
@@ -66,13 +69,13 @@ describe('OpenAIProvider', () => {
       expect(response).toHaveProperty('content');
       expect(response.content).toBe('你好！有什么可以帮助你的吗？');
       expect(response.usage.totalTokens).toBe(30);
-      expect(mockFetch).toHaveBeenCalledTimes(1);
+      expect(requestUrl).toHaveBeenCalledTimes(1);
     });
 
     it('should handle system message', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: jest.fn().mockResolvedValue({
+      (requestUrl as jest.Mock).mockResolvedValueOnce({
+        status: 200,
+        json: {
           id: 'chatcmpl-test',
           choices: [{
             message: {
@@ -86,7 +89,7 @@ describe('OpenAIProvider', () => {
             completion_tokens: 10,
             total_tokens: 30
           }
-        })
+        }
       });
 
       const provider = new OpenAIProvider({ apiKey: mockApiKey });
@@ -99,23 +102,22 @@ describe('OpenAIProvider', () => {
     });
 
     it('should include Authorization header', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: jest.fn().mockResolvedValue({
+      (requestUrl as jest.Mock).mockResolvedValueOnce({
+        status: 200,
+        json: {
           id: 'chatcmpl-test',
           choices: [{
             message: { role: 'assistant', content: 'Hi' },
             finish_reason: 'stop'
           }],
           usage: { prompt_tokens: 5, completion_tokens: 5, total_tokens: 10 }
-        })
+        }
       });
 
       const provider = new OpenAIProvider({ apiKey: mockApiKey });
       await provider.chat([{ role: 'user', content: 'Hi' }]);
 
-      expect(mockFetch).toHaveBeenCalledWith(
-        expect.any(String),
+      expect(requestUrl).toHaveBeenCalledWith(
         expect.objectContaining({
           headers: expect.objectContaining({
             'Authorization': `Bearer ${mockApiKey}`
@@ -127,9 +129,9 @@ describe('OpenAIProvider', () => {
 
   describe('analyzeBlock', () => {
     it('should analyze block content and return structured result', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: jest.fn().mockResolvedValue({
+      (requestUrl as jest.Mock).mockResolvedValueOnce({
+        status: 200,
+        json: {
           id: 'chatcmpl-test',
           choices: [{
             message: {
@@ -154,7 +156,7 @@ describe('OpenAIProvider', () => {
             completion_tokens: 80,
             total_tokens: 130
           }
-        })
+        }
       });
 
       const provider = new OpenAIProvider({ apiKey: mockApiKey });
@@ -171,9 +173,9 @@ describe('OpenAIProvider', () => {
     });
 
     it('should identify people entities', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: jest.fn().mockResolvedValue({
+      (requestUrl as jest.Mock).mockResolvedValueOnce({
+        status: 200,
+        json: {
           id: 'chatcmpl-test',
           choices: [{
             message: {
@@ -198,7 +200,7 @@ describe('OpenAIProvider', () => {
             completion_tokens: 80,
             total_tokens: 130
           }
-        })
+        }
       });
 
       const provider = new OpenAIProvider({ apiKey: mockApiKey });
@@ -213,15 +215,15 @@ describe('OpenAIProvider', () => {
 
   describe('error handling', () => {
     it('should handle API errors', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: false,
-        json: jest.fn().mockResolvedValue({
+      (requestUrl as jest.Mock).mockResolvedValueOnce({
+        status: 401,
+        json: {
           error: {
             message: 'Incorrect API key provided',
             type: 'invalid_request_error',
             code: 401
           }
-        })
+        }
       });
 
       const provider = new OpenAIProvider({ apiKey: 'invalid-key' });
@@ -231,7 +233,7 @@ describe('OpenAIProvider', () => {
     });
 
     it('should handle network errors', async () => {
-      mockFetch.mockRejectedValueOnce(new Error('Network error'));
+      (requestUrl as jest.Mock).mockRejectedValueOnce(new Error('Network error'));
 
       const provider = new OpenAIProvider({ apiKey: mockApiKey });
 
@@ -239,17 +241,16 @@ describe('OpenAIProvider', () => {
         .rejects.toThrow();
     });
 
-    it('should handle timeout', async () => {
-      mockFetch.mockImplementation(() => new Promise((_, reject) => {
-        const error = new Error('timeout');
-        (error as any).name = 'AbortError';
-        reject(error);
-      }));
+    it('should handle HTTP error status', async () => {
+      (requestUrl as jest.Mock).mockResolvedValueOnce({
+        status: 500,
+        json: {}
+      });
 
-      const provider = new OpenAIProvider({ apiKey: mockApiKey, timeout: 1 });
+      const provider = new OpenAIProvider({ apiKey: mockApiKey });
 
       await expect(provider.chat([{ role: 'user', content: 'test' }]))
-        .rejects.toThrow('Request timeout');
+        .rejects.toThrow();
     });
   });
 
