@@ -90,3 +90,52 @@
 .lifewiki-input-area textarea::placeholder {
 	color: var(--text-muted);
 }
+
+/* Input wrapper for AI panel */
+.lifewiki-input-wrapper {
+	position: relative;
+}
+
+.lifewiki-input-wrapper textarea {
+	padding-left: 80px;
+	padding-right: 40px;
+}
+
+/* Model selector */
+.lifewiki-model-selector select {
+	appearance: none;
+	background: transparent;
+	border: none;
+	color: var(--text-muted);
+	font-size: 12px;
+	cursor: pointer;
+	padding: 4px 8px;
+	border-radius: 4px;
+}
+
+.lifewiki-model-selector select:hover {
+	background: var(--background-modifier-border);
+}
+
+.lifewiki-model-selector select:focus {
+	outline: none;
+}
+
+/* Send icon */
+.lifewiki-send-icon {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 24px;
+	height: 24px;
+	border-radius: 50%;
+	transition: all 0.2s;
+}
+
+.lifewiki-send-icon.active {
+	color: var(--interactive-accent);
+}
+
+.lifewiki-send-icon:hover {
+	background: var(--background-modifier-border);
+}

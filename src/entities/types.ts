@@ -101,3 +101,28 @@ export interface EntityPreview {
 	isArchived: boolean;
 	newEntity?: boolean;  // True if this is a newly identified entity
 }
+
+/**
+ * Analysis phases for progressive entity analysis
+ * Order: people -> projects -> things -> ideas -> knowledge -> complete
+ */
+export enum AnalysisPhase {
+	People = 'people',
+	Projects = 'projects',
+	Things = 'things',
+	Ideas = 'ideas',
+	Knowledge = 'knowledge',
+	Complete = 'complete'
+}
+
+/**
+ * BlockSession - stores conversation history and analysis state for a single block
+ */
+export interface BlockSession {
+	blockId: string;
+	messages: ChatMessage[];
+	analysisResult: AnalysisResult | null;
+	createdAt: string;       // ISO 8601
+	updatedAt: string;       // ISO 8601
+	currentPhase: AnalysisPhase;
+}

@@ -5,6 +5,8 @@ import { AIAnalysisPanelView, VIEW_TYPE_AI_ANALYSIS } from './views/ai-analysis-
 import { EntityManager } from './entities/manager';
 import { AIAnalyzer } from './ai/analyzer';
 import { createSkillExecutor, SkillExecutor } from './skills';
+import { SessionManager } from './ai/session-manager';
+import { ConversationFlow } from './ai/conversation-flow';
 import type { AIProvider } from './ai/provider';
 import type { AnalysisResult } from './entities/types';
 
@@ -15,6 +17,8 @@ export default class LifeWikiPlugin extends Plugin {
 	aiAnalyzer!: AIAnalyzer;
 	aiProvider!: AIProvider;
 	skillExecutor!: SkillExecutor;
+	sessionManager!: SessionManager;
+	conversationFlow!: ConversationFlow;
 	aiAnalysisView?: AIAnalysisPanelView;
 
 	constructor(app: App, manifest: PluginManifest) {
@@ -43,6 +47,8 @@ export default class LifeWikiPlugin extends Plugin {
 			this.entityManager = new EntityManager(this.app);
 			this.aiAnalyzer = new AIAnalyzer(this.aiProvider, this.entityManager);
 			this.skillExecutor = createSkillExecutor(this.app, this.aiProvider, this.entityManager);
+			this.sessionManager = new SessionManager();
+			this.conversationFlow = new ConversationFlow(this.aiProvider);
 
 			this.registerView(VIEW_TYPE_BLOCK_EDITOR, (leaf) => new BlockEditorView(leaf, this));
 			this.registerView(VIEW_TYPE_AI_ANALYSIS, (leaf) => {
@@ -182,5 +188,13 @@ export default class LifeWikiPlugin extends Plugin {
 
 	getSkillExecutor(): SkillExecutor {
 		return this.skillExecutor;
+	}
+
+	getSessionManager(): SessionManager {
+		return this.sessionManager;
+	}
+
+	getConversationFlow(): ConversationFlow {
+		return this.conversationFlow;
 	}
 }

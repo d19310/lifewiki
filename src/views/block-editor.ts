@@ -244,6 +244,15 @@ export class BlockEditorView extends ItemView {
 	private selectBlock(blockId: string) {
 		this.selectedBlockId = blockId;
 		this.renderBlocks();
+
+		// Notify AI panel to switch to this block's session
+		const aiView = this.plugin.getAIAnalysisView();
+		if (aiView) {
+			const block = this.blocks.find(b => b.id === blockId);
+			if (block) {
+				aiView.setActiveBlock(blockId, block.content);
+			}
+		}
 	}
 
 	private async submitBlock(textarea: HTMLTextAreaElement) {
@@ -278,7 +287,26 @@ export class BlockEditorView extends ItemView {
 
 		this.renderBlocks();
 		await this.appendBlockToFile(newBlock);
-		await this.analyzeBlock(newBlock);
+
+		// Start AI analysis with conversation flow
+		const flow = this.plugin.getConversationFlow();
+		const sessionManager = this.plugin.getSessionManager();
+
+		// Create session and start analysis
+		sessionManager.getOrCreateSession(newBlock.id);
+		const result = await flow.startBlockAnalysis(newBlock.id, newBlock.content);
+
+		// Notify AI panel
+		const aiView = this.plugin.getAIAnalysisView();
+		if (aiView) {
+			aiView.startNewSession(newBlock.id, newBlock.content, result.initialResponse || '');
+		}
+
+		// Update block with analysis
+		const localBlock = this.blocks.find(b => b.id === newBlock.id);
+		if (localBlock && result.session.analysisResult) {
+			localBlock.aiAnalysis = result.session.analysisResult;
+		}
 
 		this.isLoading = false;
 	}
