@@ -2,9 +2,15 @@
 
 .lifewiki-container {
 	display: flex;
+	flex-direction: column;
 	height: 100%;
 	width: 100%;
 	font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.lifewiki-ai-panel {
+	height: 100%;
+	overflow-y: auto;
 }
 
 .lifewiki-analysis-panel {
@@ -16,6 +22,7 @@
 	display: flex;
 	flex-direction: column;
 	height: 100%;
+	width: 100%;
 }
 
 .lifewiki-blocks {
@@ -29,6 +36,11 @@
 
 .lifewiki-block {
 	transition: all 0.15s ease;
+	background: var(--background-secondary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 8px;
+	padding: 12px;
+	cursor: pointer;
 }
 
 .lifewiki-block:hover {
@@ -57,10 +69,24 @@
 	background: var(--text-muted);
 }
 
-textarea {
+/* Ensure textarea is focusable and styled */
+.lifewiki-input-area textarea {
+	width: 100%;
+	resize: none;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 8px;
+	padding: 12px;
+	font-size: 14px;
+	background: var(--background-secondary);
+	color: var(--text-primary);
 	font-family: inherit;
 }
 
-textarea:focus {
+.lifewiki-input-area textarea:focus {
 	outline: none;
+	border-color: var(--interactive-accent);
+}
+
+.lifewiki-input-area textarea::placeholder {
+	color: var(--text-muted);
 }

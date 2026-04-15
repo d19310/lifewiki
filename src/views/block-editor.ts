@@ -1,13 +1,13 @@
 /**
  * Block Editor View
  * Main UI for the journal block editor
+ * Displayed as a tab in Obsidian's center area
  */
 
 import { ItemView, WorkspaceLeaf, TFile } from 'obsidian';
 import type LifeWikiPlugin from '../main';
 import { Block, AnalysisResult } from '../entities/types';
-import { generateConfirmationItems, createEntityFromConfirmation, getEntityTypeLabel, getEntityTypeEmoji, type ConfirmationItem } from './confirmation-dialog';
-import { generateAnalysisSummary, getEntityEmoji, type AnalysisSummary } from './analysis-panel';
+import { generateConfirmationItems, createEntityFromConfirmation, getEntityTypeEmoji, type ConfirmationItem } from './confirmation-dialog';
 
 export const VIEW_TYPE_BLOCK_EDITOR = 'lifewiki-block-editor';
 
@@ -26,8 +26,6 @@ export class BlockEditorView extends ItemView {
 	private currentDate: string;
 	private inputValue: string = '';
 	private isLoading: boolean = false;
-	private analysisPanelEl: HTMLElement | null = null;
-	private currentAnalysisSummary: AnalysisSummary | null = null;
 	private confirmationItems: ConfirmationItem[] = [];
 
 	constructor(leaf: WorkspaceLeaf, plugin: LifeWikiPlugin) {
@@ -48,130 +46,27 @@ export class BlockEditorView extends ItemView {
 		const container = this.containerEl;
 		container.empty();
 
-		// Main layout
-		container.createEl('div', {
+		// Main layout - just the block editor, no embedded AI panel
+		// AI panel is shown in the right sidebar
+		const mainContainer = container.createEl('div', {
 			cls: 'lifewiki-container',
-			attr: { style: 'display: flex; height: 100%; width: 100%;' }
+			attr: { style: 'display: flex; flex-direction: column; height: 100%; width: 100%;' }
 		});
 
-		// Left: AI Analysis Panel (empty, no text)
-		this.createAnalysisPanel(container.createEl('div', {
-			cls: 'lifewiki-analysis-panel',
-			attr: { style: 'width: 280px; border-right: 1px solid var(--background-modifier-border); padding: 16px; overflow-y: auto;' }
-		}));
+		// Create date header
+		const header = mainContainer.createEl('div', {
+			attr: { style: 'padding: 16px; border-bottom: 1px solid var(--background-modifier-border);' }
+		});
+		header.createEl('h2', {
+			text: `📅 ${this.currentDate}`,
+			attr: { style: 'margin: 0; font-size: 18px; font-weight: 600;' }
+		});
 
-		// Right: Block Editor
-		this.createBlockEditor(container.createEl('div', {
-			cls: 'lifewiki-block-editor',
-			attr: { style: 'flex: 1; display: flex; flex-direction: column; padding: 16px;' }
-		}));
+		// Block Editor area
+		this.createBlockEditor(mainContainer);
 
 		// Load today's blocks
 		await this.loadBlocks();
-	}
-
-	private createAnalysisPanel(container: HTMLElement) {
-		this.analysisPanelEl = container;
-
-		// Header
-		const header = container.createEl('div', {
-			attr: { style: 'font-weight: 600; font-size: 14px; margin-bottom: 16px;' }
-		});
-		header.createEl('span', { text: '🔍 ' });
-		header.createEl('span', { text: 'AI 分析' });
-
-		// Stats summary
-		const statsEl = container.createEl('div', {
-			cls: 'lifewiki-stats',
-			attr: { style: 'font-size: 12px; color: var(--text-muted); margin-bottom: 16px;' }
-		});
-
-		// Entity sections
-		const sections: Array<{ key: keyof AnalysisSummary; emoji: string }> = [
-			{ key: 'people', emoji: '👤' },
-			{ key: 'projects', emoji: '📋' },
-			{ key: 'things', emoji: '💡' },
-			{ key: 'ideas', emoji: '💭' },
-			{ key: 'knowledge', emoji: '📚' }
-		];
-
-		for (const section of sections) {
-			const sectionEl = container.createEl('div', {
-				cls: `lifewiki-section-${section.key}`,
-				attr: { style: 'margin-bottom: 12px;' }
-			});
-
-			sectionEl.createEl('div', {
-				text: `${section.emoji} ${getEntityEmojiLabel(section.key)}`,
-				attr: { style: 'font-size: 12px; font-weight: 500; color: var(--text-muted); margin-bottom: 4px;' }
-			});
-
-			sectionEl.createEl('div', {
-				cls: `lifewiki-${section.key}-list`,
-				attr: { style: 'font-size: 13px;' }
-			});
-		}
-
-		this.renderAnalysisPanel();
-	}
-
-	private getEntityEmojiLabel(key: string): string {
-		const labels: Record<string, string> = {
-			people: '人脉',
-			projects: '项目',
-			things: '物品',
-			ideas: '想法',
-			knowledge: '知识'
-		};
-		return labels[key] || key;
-	}
-
-	private renderAnalysisPanel() {
-		if (!this.analysisPanelEl) return;
-
-		// Update stats
-		const statsEl = this.analysisPanelEl.querySelector('.lifewiki-stats');
-		if (statsEl && this.currentAnalysisSummary) {
-			const { totalEntities, archivedCount, newCount } = this.currentAnalysisSummary;
-			statsEl.textContent = `共 ${totalEntities} 个实体 | ${archivedCount} 已归档 | ${newCount} 待确认`;
-		} else if (statsEl) {
-			statsEl.textContent = '暂无分析数据';
-		}
-
-		// Update entity lists
-		const sections: (keyof AnalysisSummary)[] = ['people', 'projects', 'things', 'ideas', 'knowledge'];
-		for (const section of sections) {
-			const listEl = this.analysisPanelEl.querySelector(`.lifewiki-${section}-list`);
-			if (!listEl) continue;
-
-			listEl.empty();
-
-			if (!this.currentAnalysisSummary || this.currentAnalysisSummary[section].length === 0) {
-				listEl.createEl('div', {
-					text: '—',
-					attr: { style: 'color: var(--text-muted); font-size: 12px;' }
-				});
-				continue;
-			}
-
-			for (const entity of this.currentAnalysisSummary[section]) {
-				const itemEl = listEl.createEl('div', {
-					attr: {
-						style: `padding: 4px 0; border-bottom: 1px solid var(--background-modifier-border); ${entity.newEntity ? 'font-weight: 500;' : ''}`
-					}
-				});
-				itemEl.createEl('span', { text: entity.name });
-				itemEl.createEl('span', {
-					text: ` (${entity.statusLabel})`,
-					attr: { style: `font-size: 11px; color: ${entity.newEntity ? 'var(--text-accent)' : 'var(--text-muted)'};` }
-				});
-			}
-		}
-	}
-
-	private updateAnalysisSummary(result: AnalysisResult) {
-		this.currentAnalysisSummary = generateAnalysisSummary(result);
-		this.renderAnalysisPanel();
 	}
 
 	private createBlockEditor(container: HTMLElement) {
@@ -179,7 +74,7 @@ export class BlockEditorView extends ItemView {
 		const blocksContainer = container.createEl('div', {
 			cls: 'lifewiki-blocks',
 			attr: {
-				style: 'flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 12px;',
+				style: 'flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px;',
 			}
 		});
 
@@ -187,16 +82,17 @@ export class BlockEditorView extends ItemView {
 		const inputArea = container.createEl('div', {
 			cls: 'lifewiki-input-area',
 			attr: {
-				style: 'border-top: 1px solid var(--background-modifier-border); padding-top: 16px; margin-top: 16px;',
+				style: 'padding: 16px; border-top: 1px solid var(--background-modifier-border);',
 			}
 		});
 
-		// Input textarea (no placeholder text)
+		// Input textarea
 		const textarea = inputArea.createEl('textarea', {
 			attr: {
 				maxlength: '250',
 				rows: '3',
-				style: 'width: 100%; resize: none; border: 1px solid var(--background-modifier-border); border-radius: 8px; padding: 12px; font-size: 14px;'
+				placeholder: '输入日记内容...',
+				style: 'width: 100%; resize: none; border: 1px solid var(--background-modifier-border); border-radius: 8px; padding: 12px; font-size: 14px; background: var(--background-secondary); color: var(--text-primary);'
 			}
 		});
 
@@ -205,9 +101,9 @@ export class BlockEditorView extends ItemView {
 			this.inputValue = textarea.value;
 		});
 
-		// Send on Cmd/Ctrl + Enter
+		// Send on Enter (without Shift)
 		textarea.addEventListener('keydown', (e) => {
-			if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+			if (e.key === 'Enter' && !e.shiftKey) {
 				e.preventDefault();
 				this.submitBlock(textarea);
 			}
@@ -312,10 +208,19 @@ export class BlockEditorView extends ItemView {
 			}
 		});
 
+		// Block content
 		blockEl.createEl('div', {
 			text: block.content,
 			attr: { style: 'font-size: 14px; line-height: 1.5;' }
 		});
+
+		// Category badge
+		if (block.category && block.category !== '待确认') {
+			blockEl.createEl('span', {
+				text: ` #${block.category}`,
+				attr: { style: 'font-size: 11px; color: var(--text-muted); margin-top: 4px; display: block;' }
+			});
+		}
 
 		blockEl.addEventListener('click', () => {
 			this.selectBlock(block.id);
@@ -411,8 +316,8 @@ export class BlockEditorView extends ItemView {
 				}
 			}
 
-			// Update analysis panel
-			this.updateAnalysisSummary(result);
+			// Update the right sidebar AI panel
+			this.plugin.updateAIAnalysis(result);
 
 			this.renderBlocks();
 

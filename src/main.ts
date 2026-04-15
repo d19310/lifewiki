@@ -1,10 +1,12 @@
 import { App, Notice, Plugin, PluginManifest } from 'obsidian';
 import { LifeWikiSettingTab, LifeWikiSettings, DEFAULT_SETTINGS, createAIProvider } from './settings';
 import { BlockEditorView, VIEW_TYPE_BLOCK_EDITOR } from './views/block-editor';
+import { AIAnalysisPanelView, VIEW_TYPE_AI_ANALYSIS } from './views/ai-analysis-panel';
 import { EntityManager } from './entities/manager';
 import { AIAnalyzer } from './ai/analyzer';
 import { createSkillExecutor, SkillExecutor } from './skills';
 import type { AIProvider } from './ai/provider';
+import type { AnalysisResult } from './entities/types';
 
 export default class LifeWikiPlugin extends Plugin {
 	settings!: LifeWikiSettings;
@@ -13,6 +15,7 @@ export default class LifeWikiPlugin extends Plugin {
 	aiAnalyzer!: AIAnalyzer;
 	aiProvider!: AIProvider;
 	skillExecutor!: SkillExecutor;
+	aiAnalysisView?: AIAnalysisPanelView;
 
 	constructor(app: App, manifest: PluginManifest) {
 		super(app, manifest);
@@ -42,6 +45,10 @@ export default class LifeWikiPlugin extends Plugin {
 			this.skillExecutor = createSkillExecutor(this.app, this.aiProvider, this.entityManager);
 
 			this.registerView(VIEW_TYPE_BLOCK_EDITOR, (leaf) => new BlockEditorView(leaf, this));
+			this.registerView(VIEW_TYPE_AI_ANALYSIS, (leaf) => {
+				this.aiAnalysisView = new AIAnalysisPanelView(leaf, this);
+				return this.aiAnalysisView;
+			});
 
 			this.addRibbonIcon('document', '打开日记', () => {
 				this.openBlockEditor();
@@ -130,18 +137,39 @@ export default class LifeWikiPlugin extends Plugin {
 
 	async openBlockEditor() {
 		const { workspace } = this.app;
+
+		// Open main block editor in tab
 		const existing = workspace.getLeavesOfType(VIEW_TYPE_BLOCK_EDITOR);
 		if (existing.length > 0) {
 			workspace.revealLeaf(existing[0]);
-			return;
+		} else {
+			const leaf = workspace.getLeaf('tab');
+			await leaf.setViewState({
+				type: VIEW_TYPE_BLOCK_EDITOR,
+				active: true
+			});
+			workspace.revealLeaf(leaf);
 		}
 
-		const leaf = workspace.getLeaf('tab');
-		await leaf.setViewState({
-			type: VIEW_TYPE_BLOCK_EDITOR,
-			active: true
-		});
-		workspace.revealLeaf(leaf);
+		// Open AI analysis panel in right sidebar
+		const existingAI = workspace.getLeavesOfType(VIEW_TYPE_AI_ANALYSIS);
+		if (existingAI.length > 0) {
+			workspace.revealLeaf(existingAI[0]);
+		} else {
+			const rightLeaf = workspace.getRightLeaf(false);
+			if (rightLeaf) {
+				await rightLeaf.setViewState({
+					type: VIEW_TYPE_AI_ANALYSIS,
+					active: false
+				});
+			}
+		}
+	}
+
+	updateAIAnalysis(result: AnalysisResult) {
+		if (this.aiAnalysisView) {
+			this.aiAnalysisView.updateAnalysis(result);
+		}
 	}
 
 	getEntityManager(): EntityManager {
