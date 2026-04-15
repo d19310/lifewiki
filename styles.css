@@ -1,0 +1,45 @@
+/* LifeWiki Plugin Styles */
+
+.lifewiki-container {
+	height: 100%;
+	width: 100%;
+	font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.lifewiki-block {
+	transition: all 0.15s ease;
+}
+
+.lifewiki-block:hover {
+	border-color: var(--interactive-accent) !important;
+}
+
+.lifewiki-block.selected {
+	border-color: var(--interactive-accent) !important;
+	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.lifewiki-blocks::-webkit-scrollbar {
+	width: 6px;
+}
+
+.lifewiki-blocks::-webkit-scrollbar-track {
+	background: transparent;
+}
+
+.lifewiki-blocks::-webkit-scrollbar-thumb {
+	background: var(--background-modifier-border);
+	border-radius: 3px;
+}
+
+.lifewiki-blocks::-webkit-scrollbar-thumb:hover {
+	background: var(--text-muted);
+}
+
+textarea {
+	font-family: inherit;
+}
+
+textarea:focus {
+	outline: none;
+}

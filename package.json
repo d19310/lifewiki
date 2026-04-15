@@ -1,0 +1,31 @@
+{
+  "name": "lifewiki",
+  "version": "0.1.0",
+  "description": "AI-powered daily journal analysis with entity extraction for Obsidian",
+  "main": "main.js",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "node esbuild.config.mjs production",
+    "lint": "eslint src/**/*.ts",
+    "test": "jest",
+    "test:watch": "jest --watch"
+  },
+  "keywords": [
+    "obsidian",
+    "plugin",
+    "journal",
+    "ai",
+    "knowledge-management"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/jest": "^30.0.0",
+    "@types/node": "^20.0.0",
+    "esbuild": "^0.28.0",
+    "jest": "^30.3.0",
+    "obsidian": "^1.12.3",
+    "ts-jest": "^29.4.9",
+    "typescript": "^6.0.2"
+  }
+}
