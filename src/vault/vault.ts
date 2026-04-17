@@ -193,7 +193,7 @@ export class VaultOperations {
 
   async exportEntities(type?: EntityType): Promise<string> {
     const entities = type ?
-      this.entityManager.getEntitiesByType(type) :
+      await this.entityManager.getEntitiesByType(type) :
       Array.from(this.entityManager['entityCache'].values());
 
     return JSON.stringify(entities, null, 2);

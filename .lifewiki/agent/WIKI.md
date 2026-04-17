@@ -123,14 +123,18 @@ metadata:
 ```
 
 ### 任务 (task)
+任务归类在 Projects 目录，文件名为 XXXX任务.md
 
 ```yaml
 metadata:
-  project: "所属项目名称"
-  status: "todo|in_progress|completed"
-  due_date: "2026-04-20"
+  status: "pending|in_progress|completed|cancelled"
   priority: "high|medium|low"
-  assignee: "负责人"
+  deadline: "2026-04-20"
+  assignee: "负责人姓名"
+  project_name: "所属项目名称"
+  project_id: "所属项目ID"
+  description: "任务详细描述"
+  notes: "备注信息"
 ```
 
 ## 互动记录类型

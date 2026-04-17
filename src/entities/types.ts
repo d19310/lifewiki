@@ -120,6 +120,7 @@ export enum AnalysisPhase {
  */
 export interface BlockSession {
 	blockId: string;
+	content: string;           // Original diary content for this block
 	messages: ChatMessage[];
 	analysisResult: AnalysisResult | null;
 	createdAt: string;       // ISO 8601

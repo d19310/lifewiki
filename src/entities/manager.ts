@@ -20,10 +20,20 @@ export class EntityManager {
 	private app: App;
 	private entityCache: Map<string, Entity> = new Map();
 	private lastIndexTime: Date | null = null;
+	private initPromise: Promise<void> | null = null;
 
 	constructor(app: App) {
 		this.app = app;
-		this.buildEntityCache();
+		this.initPromise = this.buildEntityCache();
+	}
+
+	/**
+	 * Wait for initialization to complete
+	 */
+	async ensureInitialized(): Promise<void> {
+		if (this.initPromise) {
+			await this.initPromise;
+		}
 	}
 
 	/**
@@ -31,13 +41,8 @@ export class EntityManager {
 	 */
 	private async buildEntityCache(): Promise<void> {
 		const vault = this.app.vault;
-		const dailyFolder = vault.getAbstractFileByPath('Daily');
 
-		if (!dailyFolder || !(dailyFolder instanceof TFolder)) {
-			return;
-		}
-
-		// Index all entity folders
+		// Index all entity folders regardless of Daily folder existence
 		for (const [type, folderName] of Object.entries(ENTITY_FOLDERS)) {
 			const folder = vault.getAbstractFileByPath(folderName);
 			if (folder instanceof TFolder) {
@@ -198,15 +203,30 @@ export class EntityManager {
 	 * Create a new entity
 	 */
 	async createEntity(entity: EntityCreateInput): Promise<Entity> {
-		const folder = this.app.vault.getAbstractFileByPath(ENTITY_FOLDERS[entity.type]);
+		console.log('[EntityManager] createEntity called:', JSON.stringify(entity));
+
+		// Tasks go to Projects folder, others use their respective folders
+		const folderPath = entity.type === 'task' ? 'Projects' : ENTITY_FOLDERS[entity.type];
+		console.log('[EntityManager] Folder path:', folderPath);
+
+		const folder = this.app.vault.getAbstractFileByPath(folderPath);
+		console.log('[EntityManager] Folder exists:', folder ? 'yes' : 'no', folder?.constructor.name);
 
 		if (!(folder instanceof TFolder)) {
 			// Create folder if doesn't exist
-			await this.app.vault.createFolder(ENTITY_FOLDERS[entity.type]);
+			console.log('[EntityManager] Creating folder:', folderPath);
+			try {
+				await this.app.vault.createFolder(folderPath);
+				console.log('[EntityManager] Folder created successfully');
+			} catch (e) {
+				console.error('[EntityManager] Failed to create folder:', e);
+			}
 		}
 
-		const fileName = `${entity.title}.md`;
-		const filePath = `${ENTITY_FOLDERS[entity.type]}/${fileName}`;
+		// Task files end with "任务", others use entity title
+		const fileName = entity.type === 'task' ? `${entity.title}任务.md` : `${entity.title}.md`;
+		const filePath = `${folderPath}/${fileName}`;
+		console.log('[EntityManager] File path:', filePath);
 
 		// Generate ID
 		const entityId = this.generateEntityId(filePath);
@@ -219,7 +239,15 @@ export class EntityManager {
 
 		// Write file
 		const content = this.entityToMarkdown(fullEntity);
-		await this.app.vault.create(filePath, content);
+		console.log('[EntityManager] Creating file with content length:', content.length);
+
+		try {
+			await this.app.vault.create(filePath, content);
+			console.log('[EntityManager] File created successfully');
+		} catch (e) {
+			console.error('[EntityManager] Failed to create file:', e);
+			throw e;
+		}
 
 		// Update cache
 		this.entityCache.set(entityId, fullEntity);
@@ -353,7 +381,7 @@ ${body}`;
 	}
 
 	/**
-	 * Generate body content from entity
+	 * Generate body content from entity (follows PRD 3.3.x templates)
 	 */
 	private entityToBody(entity: Entity): string {
 		const lines: string[] = [];
@@ -361,23 +389,278 @@ ${body}`;
 		lines.push(`# ${entity.title}`);
 		lines.push('');
 
-		// Summary section if exists
+		// Summary section
 		if (entity.summary) {
 			lines.push('## 摘要');
 			lines.push(entity.summary);
 			lines.push('');
 		}
 
-		// Type-specific sections could be added here
-		// For now, keep it simple - Obsidian will render the rest
+		// Type-specific sections following PRD templates
+		switch (entity.type) {
+			case 'person':
+				lines.push(...this.generatePersonBody(entity));
+				break;
+			case 'project':
+				lines.push(...this.generateProjectBody(entity));
+				break;
+			case 'task':
+				lines.push(...this.generateTaskBody(entity));
+				break;
+			case 'thing':
+				lines.push(...this.generateThingBody(entity));
+				break;
+			case 'idea':
+				lines.push(...this.generateIdeaBody(entity));
+				break;
+			case 'knowledge':
+				lines.push(...this.generateKnowledgeBody(entity));
+				break;
+		}
 
 		return lines.join('\n');
 	}
 
 	/**
+	 * Person body template (PRD 3.3.2)
+	 */
+	private generatePersonBody(entity: Entity): string[] {
+		const lines: string[] = [];
+		const m = entity.metadata || {};
+
+		lines.push('## 基本信息');
+		if (m.company) lines.push(`- **公司**: ${m.company}`);
+		if (m.position) lines.push(`- **职位**: ${m.position}`);
+		if (m.first_contact) lines.push(`- **首次接触**: ${m.first_contact}`);
+		if (m.contact_channel) lines.push(`- **渠道**: ${m.contact_channel}`);
+		lines.push('');
+
+		lines.push('## 背景');
+		lines.push('待补充');
+		lines.push('');
+
+		lines.push('## 互动记录');
+		if (entity.interactions.length === 0) {
+			lines.push('暂无互动记录');
+		} else {
+			for (const interaction of entity.interactions.slice(-5)) {
+				const date = interaction.timestamp.split('T')[0];
+				const blockRef = interaction.sourceBlockId ? ` → [[${date}]]` : '';
+				lines.push(`- ${date}: ${interaction.content}${blockRef}`);
+			}
+		}
+		lines.push('');
+
+		lines.push('## 跟进事项');
+		lines.push('- [ ] 补充公司背景');
+		lines.push('- [ ] 补充职位详情');
+
+		return lines;
+	}
+
+	/**
+	 * Project body template (PRD 3.3.3)
+	 */
+	private generateProjectBody(entity: Entity): string[] {
+		const lines: string[] = [];
+		const m = entity.metadata || {};
+
+		lines.push('## 项目信息');
+		lines.push(entity.summary || '待补充');
+		lines.push('');
+
+		lines.push('## 背景');
+		lines.push('待补充');
+		lines.push('');
+
+		lines.push('## 关键里程碑');
+		if (m.milestones && Array.isArray(m.milestones)) {
+			for (const milestone of m.milestones) {
+				const status = milestone.status === 'completed' ? '[x]' : '[ ]';
+				lines.push(`- ${status} ${milestone.title}`);
+			}
+		} else {
+			lines.push('- [ ] 需求确认');
+			lines.push('- [ ] 方案交付');
+			lines.push('- [ ] 项目验收');
+		}
+		lines.push('');
+
+		lines.push('## 跟进事项');
+		lines.push('- [ ] 补充客户详细信息');
+		lines.push('- [ ] 补充预算信息');
+
+		return lines;
+	}
+
+	/**
+	 * Task body template
+	 * Tasks are categorized under Projects folder
+	 */
+	private generateTaskBody(entity: Entity): string[] {
+		const lines: string[] = [];
+		const m = entity.metadata || {};
+
+		lines.push('## 任务信息');
+		lines.push(entity.summary || '待补充');
+		lines.push('');
+
+		lines.push('## 基本属性');
+		lines.push(`- **状态**: ${m.status || '待处理'}`);
+		lines.push(`- **优先级**: ${m.priority || '中'}`);
+		if (m.deadline) lines.push(`- **截止日期**: ${m.deadline}`);
+		if (m.assignee) lines.push(`- **负责人**: ${m.assignee}`);
+		lines.push('');
+
+		lines.push('## 所属项目');
+		if (m.project_name) lines.push(`- **项目名称**: ${m.project_name}`);
+		if (m.project_id) lines.push(`- **项目ID**: ${m.project_id}`);
+		lines.push('');
+
+		lines.push('## 任务描述');
+		lines.push(m.description || '待补充');
+		lines.push('');
+
+		lines.push('## 子任务');
+		if (m.subtasks && Array.isArray(m.subtasks)) {
+			for (const subtask of m.subtasks) {
+				const status = subtask.completed ? '[x]' : '[ ]';
+				lines.push(`- ${status} ${subtask.title}`);
+			}
+		} else {
+			lines.push('- [ ] 子任务1');
+			lines.push('- [ ] 子任务2');
+		}
+		lines.push('');
+
+		lines.push('## 进度记录');
+		if (entity.interactions.length === 0) {
+			lines.push('暂无相关记录');
+		} else {
+			for (const interaction of entity.interactions.slice(-5)) {
+				const date = interaction.timestamp.split('T')[0];
+				lines.push(`- ${date}: ${interaction.content}`);
+			}
+		}
+		lines.push('');
+
+		lines.push('## 备注');
+		lines.push(m.notes || '暂无备注');
+
+		return lines;
+	}
+
+	/**
+	 * Thing body template (PRD 3.3.4)
+	 */
+	private generateThingBody(entity: Entity): string[] {
+		const lines: string[] = [];
+		const m = entity.metadata || {};
+
+		lines.push('## 基本信息');
+		if (m.thing_type) lines.push(`- **类型**: ${m.thing_type}`);
+		if (m.url) lines.push(`- **链接**: ${m.url}`);
+		if (m.price_range) lines.push(`- **价格**: ${m.price_range}`);
+		lines.push('');
+
+		if (m.why_interesting) {
+			lines.push('## 为什么关注');
+			lines.push(m.why_interesting);
+			lines.push('');
+		}
+
+		lines.push('## 跟进记录');
+		if (entity.interactions.length === 0) {
+			lines.push('暂无相关记录');
+		} else {
+			for (const interaction of entity.interactions.slice(-5)) {
+				const date = interaction.timestamp.split('T')[0];
+				lines.push(`- ${date}: ${interaction.content}`);
+			}
+		}
+
+		return lines;
+	}
+
+	/**
+	 * Idea body template (PRD 3.3.5)
+	 */
+	private generateIdeaBody(entity: Entity): string[] {
+		const lines: string[] = [];
+
+		lines.push('## 想法描述');
+		lines.push(entity.summary || '待补充');
+		lines.push('');
+
+		lines.push('## 相关链接');
+		// Link to related entities via Obsidian links
+		if (entity.relatedEntities.length > 0) {
+			for (const rel of entity.relatedEntities) {
+				if (rel.entityId) {
+					// Find the related entity title
+					const related = this.entityCache.get(rel.entityId);
+					if (related) {
+						lines.push(`- [[${related.title}]]`);
+					}
+				}
+			}
+		}
+		lines.push('');
+
+		lines.push('## 进展记录');
+		if (entity.interactions.length === 0) {
+			lines.push('暂无相关记录');
+		} else {
+			for (const interaction of entity.interactions.slice(-5)) {
+				const date = interaction.timestamp.split('T')[0];
+				lines.push(`- ${date}: ${interaction.content}`);
+			}
+		}
+
+		return lines;
+	}
+
+	/**
+	 * Knowledge body template (PRD 3.3.6)
+	 */
+	private generateKnowledgeBody(entity: Entity): string[] {
+		const lines: string[] = [];
+		const m = entity.metadata || {};
+
+		lines.push('## 摘要');
+		lines.push(entity.summary || '待补充');
+		lines.push('');
+
+		if (m.url) {
+			lines.push('## 链接');
+			lines.push(m.url);
+			lines.push('');
+		}
+
+		lines.push('## 核心内容');
+		lines.push('...');
+		lines.push('');
+
+		if (entity.relatedEntities.length > 0) {
+			lines.push('## 相关引用');
+			for (const rel of entity.relatedEntities) {
+				if (rel.entityId) {
+					const related = this.entityCache.get(rel.entityId);
+					if (related) {
+						lines.push(`- [[${related.title}]]`);
+					}
+				}
+			}
+		}
+
+		return lines;
+	}
+
+	/**
 	 * Get all entities of a specific type
 	 */
-	getEntitiesByType(type: EntityType): Entity[] {
+	async getEntitiesByType(type: EntityType): Promise<Entity[]> {
+		await this.ensureInitialized();
 		const results: Entity[] = [];
 		for (const entity of this.entityCache.values()) {
 			if (entity.type === type) {

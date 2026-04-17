@@ -7,6 +7,7 @@ import { AIAnalyzer } from './ai/analyzer';
 import { createSkillExecutor, SkillExecutor } from './skills';
 import { SessionManager } from './ai/session-manager';
 import { ConversationFlow } from './ai/conversation-flow';
+import { createLangGraphAgent, LangGraphAgent } from './ai/langgraph/agent';
 import type { AIProvider } from './ai/provider';
 import type { AnalysisResult } from './entities/types';
 
@@ -19,6 +20,7 @@ export default class LifeWikiPlugin extends Plugin {
 	skillExecutor!: SkillExecutor;
 	sessionManager!: SessionManager;
 	conversationFlow!: ConversationFlow;
+	langGraphAgent?: LangGraphAgent;
 	aiAnalysisView?: AIAnalysisPanelView;
 
 	constructor(app: App, manifest: PluginManifest) {
@@ -47,8 +49,27 @@ export default class LifeWikiPlugin extends Plugin {
 			this.entityManager = new EntityManager(this.app);
 			this.aiAnalyzer = new AIAnalyzer(this.aiProvider, this.entityManager);
 			this.skillExecutor = createSkillExecutor(this.app, this.aiProvider, this.entityManager);
-			this.sessionManager = new SessionManager();
-			this.conversationFlow = new ConversationFlow(this.aiProvider);
+			this.sessionManager = new SessionManager(this.app);
+			await this.sessionManager.initialize();
+
+			// Initialize based on feature flag
+			// Always initialize conversationFlow for backwards compatibility
+			this.conversationFlow = new ConversationFlow(this.aiProvider, this.app);
+			this.conversationFlow.setEntityManager(this.entityManager);
+			await this.conversationFlow.initialize();
+
+			// Initialize LangGraph agent if enabled
+			if (this.settings.useLangGraph) {
+				console.log('LifeWiki: Initializing LangGraph agent...');
+				this.langGraphAgent = createLangGraphAgent(
+					this.aiProvider,
+					this.entityManager,
+					this.app,
+					this.settings.systemPrompt
+				);
+				await this.langGraphAgent.initialize();
+				console.log('LifeWiki: LangGraph agent initialized');
+			}
 
 			this.registerView(VIEW_TYPE_BLOCK_EDITOR, (leaf) => new BlockEditorView(leaf, this));
 			this.registerView(VIEW_TYPE_AI_ANALYSIS, (leaf) => {
@@ -157,7 +178,7 @@ export default class LifeWikiPlugin extends Plugin {
 			workspace.revealLeaf(leaf);
 		}
 
-		// Open AI analysis panel in right sidebar
+		// Open AI analysis panel in right sidebar - make it active too
 		const existingAI = workspace.getLeavesOfType(VIEW_TYPE_AI_ANALYSIS);
 		if (existingAI.length > 0) {
 			workspace.revealLeaf(existingAI[0]);
@@ -166,8 +187,9 @@ export default class LifeWikiPlugin extends Plugin {
 			if (rightLeaf) {
 				await rightLeaf.setViewState({
 					type: VIEW_TYPE_AI_ANALYSIS,
-					active: false
+					active: true
 				});
+				workspace.revealLeaf(rightLeaf);
 			}
 		}
 	}
@@ -196,5 +218,13 @@ export default class LifeWikiPlugin extends Plugin {
 
 	getConversationFlow(): ConversationFlow {
 		return this.conversationFlow;
+	}
+
+	getLangGraphAgent(): LangGraphAgent | undefined {
+		return this.langGraphAgent;
+	}
+
+	getAIAnalysisView(): AIAnalysisPanelView | undefined {
+		return this.aiAnalysisView;
 	}
 }

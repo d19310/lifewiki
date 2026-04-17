@@ -15,6 +15,7 @@ export interface LifeWikiSettings {
 	systemPrompt: string;
 	skillsEnabled: boolean;
 	autoConfirm: boolean;
+	useLangGraph: boolean;
 }
 
 export const DEFAULT_SETTINGS: LifeWikiSettings = {
@@ -28,7 +29,8 @@ export const DEFAULT_SETTINGS: LifeWikiSettings = {
 3. 使用工具创建/更新实体
 4. 用友好方式与用户互动，补充实体信息`,
 	skillsEnabled: true,
-	autoConfirm: false
+	autoConfirm: false,
+	useLangGraph: false
 };
 
 export class LifeWikiSettingTab extends SettingTab {
@@ -202,6 +204,18 @@ export class LifeWikiSettingTab extends SettingTab {
 				toggle.setValue(this.plugin.settings.autoConfirm)
 					.onChange(async (value) => {
 						this.plugin.settings.autoConfirm = value;
+						await this.plugin.saveSettings();
+					});
+			});
+
+		// Use LangGraph
+		new Setting(containerEl)
+			.setName('使用 LangGraph')
+			.setDesc('启用 LangGraph TypeScript SDK（实验性功能）')
+			.addToggle(toggle => {
+				toggle.setValue(this.plugin.settings.useLangGraph)
+					.onChange(async (value) => {
+						this.plugin.settings.useLangGraph = value;
 						await this.plugin.saveSettings();
 					});
 			});

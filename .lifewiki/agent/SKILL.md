@@ -3,7 +3,7 @@
 ## 技能列表
 
 ### search_entity
-在已归档实体中搜索匹配项。
+在已归档实体中搜索匹配项。返回完整的实体信息供 AI 理解背景。
 
 **输入**:
 ```json
@@ -20,7 +20,21 @@
     "id": "xxx",
     "type": "person",
     "name": "实体名称",
-    "summary": "一句话描述"
+    "titleRaw": "原始名称",
+    "aliases": ["别名1"],
+    "summary": "一句话描述",
+    "tags": ["标签1"],
+    "metadata": {
+      "status": "active",
+      "公司": "xxx公司",
+      "职位": "总经理"
+    },
+    "recentInteractions": [
+      {"timestamp": "2026-04-15", "type": "diary_mention", "content": "讨论了项目进展"}
+    ],
+    "relatedEntities": [
+      {"entityId": "yyy", "relation": "负责人", "context": "项目负责人"}
+    ]
   }
 }
 ```
@@ -51,16 +65,19 @@
 ```
 
 ### update_entity
-更新已有实体。
+更新已有实体。**元数据更新是重点**，包含实体的关键事实信息。
 
 **输入**:
 ```json
 {
   "entityId": "xxx",
   "updates": {
-    "title": "新名称",
     "summary": "新描述",
-    "tags": ["标签1"]
+    "tags": ["标签1"],
+    "metadata": {
+      "公司": "新公司名",
+      "职位": "新职位"
+    }
   }
 }
 ```
@@ -68,7 +85,9 @@
 **输出**:
 ```json
 {
-  "success": true
+  "success": true,
+  "updatedFields": ["summary", "metadata"],
+  "newMetadata": {"公司": "新公司名", "职位": "新职位"}
 }
 ```
 
@@ -99,7 +118,7 @@
 {
   "entityIdA": "xxx",
   "entityIdB": "yyy",
-  "relation": "负责人|成员|相关",
+  "relation": "负责人|成员|株式会社",
   "context": "在XXX项目中担任YYY角色"
 }
 ```
@@ -129,8 +148,12 @@
     {
       "id": "xxx",
       "name": "实体名称",
+      "titleRaw": "原始名称",
+      "aliases": ["别名"],
       "summary": "一句话描述",
-      "updatedAt": "2026-04-15"
+      "tags": ["标签"],
+      "metadata": {"status": "active"},
+      "lastInteraction": "最近一次互动内容摘要"
     }
   ]
 }

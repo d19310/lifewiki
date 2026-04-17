@@ -540,6 +540,44 @@ AI 通过自然对话与用户确认要归档的实体，不在界面上预置�
 4. **不认识 = 未归档**：AI 回复"不认识"、"不了解"、"不知道"表示在已归档实体中检索不到
 5. **认识 = 已归档**：AI 回复"更新了和 XXX 的互动记录"表示该实体已存在
 
+**实体分类体系**：
+
+```
+### 大类（对应存储目录）
+- 人脉 (People) → People/目录
+- 事项 (Projects) → Projects/目录，包含"项目"和"任务"两种小类
+- 物品 (Things) → Things/目录，包含"产品"、"工具"、"框架"、"软件"、"商品"、"设备"等小类
+- 想法 (Ideas) → Ideas/目录，包含"观点"和"想法"两种小类
+- 知识 (Knowledge) → Knowledge/目录，包含"网页链接"和"文档"两种小类
+
+### 小类（用于询问用户确认）
+- 人脉小类：同事、客户、朋友、领导...
+- 事项小类：项目、任务
+- 物品小类：产品、工具、框架、软件、商品、设备
+- 想法小类：观点、想法
+- 知识小类：网页链接、文档
+```
+
+**结构化标记参考**：
+
+AI 回复中必须包含结构化数据标记，供系统解析：
+
+| 标记 | 用途 | 示例 |
+|------|------|------|
+| `[ENTITY:]` | 未归档实体发现，询问用户确认小类 | `[ENTITY:{"status":"unknown","entities":[{"name":"张三","inferred_type":"person","small_type":"待确认","reason":"姓名"}]}]` |
+| `[ARCHIVE:]` | 用户确认后，执行归档操作 | `[ARCHIVE:{"entities":[{"name":"张三","type":"person","small_type":"同事","context":"日记中提及"}]}]` |
+| `[UPDATE:]` | 更新已有实体 | `[UPDATE:{"entity_id":"xxx","updates":[{"field":"metadata.role","value":"项目负责人"},{"field":"interactions","content":"在日记中被提及"}]}]` |
+| `[RELATION:]` | 发现实体间关系 | `[RELATION:{"from":"张三","to":"项目A","relation":"负责人"}]` |
+| `[STATUS:]` | 分析阶段完成 | `[STATUS:{"phase":"complete"}]` |
+
+**实体类型推断规则**：
+
+- 姓名 → 人脉
+- 包含"项目"、"任务"、"运营" → 事项
+- 包含"产品"、"工具"、"框架"、"软件"、"商品"、"设备" → 物品
+- 观点、想法、建议 → 想法
+- 包含URL、链接、文档 → 知识
+
 **对话示例**：
 
 ```
@@ -619,6 +657,42 @@ AI 分析日记，识别人脉实体
                             询问是否需要补充
 ```
 
+**完整分析 Phase 流程**：
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│  Phase 1: 初始分析 & Vault 检索                              │
+├──────────────────────────────────────────────────────────────┤
+│  1. 用户输入 Block，触发 AI 分析                              │
+│  2. AI 识别人脉/事项/物品/想法/知识实体                        │
+│  3. 对每个实体在 vault 中检索是否已归档                         │
+│     - 检索结果传给 AI 作为上下文                               │
+│                                                              │
+│  Phase 2a: 未归档实体处理                                    │
+│  1. AI 发现未归档实体 → 自然询问用户确认小类                     │
+│     例："你提到的 **康靖媛** 我不认识，请问是同事还是客户？"      │
+│  2. 用户确认小类（如"同事"）                                  │
+│  3. AI 输出 [ARCHIVE:...] 标记                               │
+│  4. 系统创建实体文档，更新元数据                                │
+│  5. 询问是否还有补充 → 继续或进入下一 Phase                      │
+│                                                              │
+│  Phase 2b: 已归档实体处理                                    │
+│  1. AI 发现已归档实体 → 更新互动记录                            │
+│  2. 发现新信息 → 询问是否更新                                  │
+│     例："**王五** 我认识，他是项目负责人，要更新档案吗？"         │
+│  3. 用户确认后 → AI 输出 [UPDATE:...] 标记                     │
+│  4. 系统更新实体文档                                          │
+│                                                              │
+│  Phase 3: 关系发现                                          │
+│  1. AI 发现实体间关系 → 询问用户确认                            │
+│     例："**张佳伟** 是 **公共算力平台项目** 的负责人吗？"       │
+│  2. 用户确认 → AI 输出 [RELATION:...] 标记                    │
+│  3. 系统建立实体间关系                                        │
+│                                                              │
+│  Phase 4-7: 物品/想法/知识 分析（同 Phase 2a/2b 流程）          │
+└──────────────────────────────────────────────────────────────┘
+```
+
 **多轮对话顺序**：
 
 ```
@@ -671,7 +745,233 @@ AI 分析日记，识别人脉实体
 
 每条 Block 输入后**立即触发** AI 分析。
 
-#### 3.2.4 AI 分析面板 UI
+### 3.2.4 Per-Block 会话持久化
+
+#### 3.2.4.1 设计目标
+
+每个 Block 的 AI 对话会话独立保存，点击 Block 时加载历史会话，用户可继续对话。
+
+#### 3.2.4.2 存储位置
+
+```
+Vault/
+└── .lifewiki/                    # LifeWiki 私有数据（隐藏）
+    └── sessions/                  # Per-block 会话目录
+        ├── {blockId-1}.json      # Block 1 的会话
+        ├── {blockId-2}.json      # Block 2 的会话
+        └── {blockId-N}.json      # Block N 的会话
+```
+
+#### 3.2.4.3 会话数据结构
+
+```typescript
+interface ChatMessage {
+  role: 'user' | 'assistant';    // 消息角色
+  content: string;                 // 消息内容
+  timestamp: string;               // ISO 8601 时间戳
+}
+
+interface BlockSession {
+  blockId: string;                // 关联的 Block ID（UUID）
+  content: string;                // Block 原始内容
+  messages: ChatMessage[];         // 对话历史（按时间顺序）
+  analysisResult: AnalysisResult | null;  // 分析结果快照
+  currentPhase: AnalysisPhase;     // 当前分析阶段
+  createdAt: string;              // 会话创建时间
+  updatedAt: string;              // 最后更新时间
+}
+
+type AnalysisPhase = 'people' | 'projects' | 'things' | 'ideas' | 'knowledge' | 'complete';
+```
+
+**JSON 文件示例** (`{blockId}.json`):
+
+```json
+{
+  "blockId": "4afaafa9-9aaa-4942-a837-2fd8a506be96",
+  "content": "今天和康靖媛、张佳伟讨论了公共算力平台运营问题",
+  "messages": [
+    {
+      "role": "assistant",
+      "content": "你提到的 **康靖媛**、**张佳伟** 我不认识，请问他们是同事还是客户？",
+      "timestamp": "2026-04-17T08:30:00Z"
+    },
+    {
+      "role": "user",
+      "content": "他们是我的同事",
+      "timestamp": "2026-04-17T08:30:15Z"
+    },
+    {
+      "role": "assistant",
+      "content": "好的，已完成 **康靖媛**、**张佳伟** 的人脉归档。",
+      "timestamp": "2026-04-17T08:30:20Z"
+    }
+  ],
+  "analysisResult": null,
+  "currentPhase": "projects",
+  "createdAt": "2026-04-17T08:30:00Z",
+  "updatedAt": "2026-04-17T08:30:20Z"
+}
+```
+
+#### 3.2.4.4 会话管理流程
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                        会话管理流程                                    │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  场景1: 新建 Block                                                  │
+│  ─────────────────                                                  │
+│  用户输入 Block 内容                                                 │
+│       │                                                            │
+│       ▼                                                            │
+│  创建新 Session（blockId, 空 messages）                            │
+│       │                                                            │
+│       ▼                                                            │
+│  触发 AI 分析，生成 initialResponse                                  │
+│       │                                                            │
+│       ▼                                                            │
+│  保存 initialResponse 到 messages                                   │
+│       │                                                            │
+│       ▼                                                            │
+│  AI 面板显示新会话                                                  │
+│                                                                     │
+│  场景2: 选中已有 Block                                              │
+│  ─────────────────────────                                          │
+│  用户点击 Block                                                     │
+│       │                                                            │
+│       ▼                                                            │
+│  检查是否存在该 Block 的会话文件                                     │
+│       │                                                            │
+│       ├─── 存在 ──→ 加载会话文件到内存                               │
+│       │              显示对话历史                                      │
+│       │              用户可继续对话                                   │
+│       │                                                            │
+│       └─── 不存在 ──→ 创建新 Session                                │
+│                                                                     │
+│  场景3: 用户发送消息                                                │
+│  ─────────────────────                                              │
+│  用户在输入框发送消息                                                │
+│       │                                                            │
+│       ▼                                                            │
+│  保存用户消息到 messages                                            │
+│       │                                                            │
+│       ▼                                                            │
+│  显示用户消息气泡                                                    │
+│       │                                                            │
+│       ▼                                                            │
+│  调用 AI继续分析                                                    │
+│       │                                                            │
+│       ▼                                                            │
+│  AI 返回响应 → 保存到 messages                                      │
+│       │                                                            │
+│       ▼                                                            │
+│  显示 AI 消息气泡                                                   │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+#### 3.2.4.5 SessionManager 核心 API
+
+```typescript
+class SessionManager {
+  private sessions: Map<string, BlockSession> = new Map();
+  private app: App;
+
+  constructor(app: App) {
+    this.app = app;
+  }
+
+  /** 初始化 - 加载所有会话文件到内存 */
+  async initialize(): Promise<void>;
+
+  /** 获取或创建会话 */
+  getOrCreateSession(blockId: string): BlockSession;
+
+  /** 添加消息 */
+  addMessage(blockId: string, message: ChatMessage): void;
+
+  /** 设置分析结果 */
+  setAnalysisResult(blockId: string, result: AnalysisResult): void;
+
+  /** 设置分析阶段 */
+  updatePhase(blockId: string, phase: AnalysisPhase): void;
+
+  /** 清空会话 */
+  clearSession(blockId: string): Promise<void>;
+
+  /** 清空所有会话 */
+  clearAllSessions(): Promise<void>;
+}
+```
+
+#### 3.2.4.6 持久化策略
+
+| 操作 | 持久化时机 | 实现方式 |
+|------|-----------|---------|
+| 创建会话 | 首次 `getOrCreateSession` | `vault.adapter.write` 原子创建 |
+| 添加消息 | `addMessage` 后立即 | `vault.adapter.write` 覆盖文件 |
+| 更新阶段 | `updatePhase` 后立即 | `vault.adapter.write` 覆盖文件 |
+| 清空会话 | `clearSession` 后 | `vault.delete` 删除文件 |
+
+**关键实现**：
+- 使用 `vault.adapter.write` 而非 `vault.create/vault.modify`，避免"文件已存在"错误
+- 每次保存先 `JSON.parse(JSON.stringify(session))` 深拷贝，避免引用问题
+- 会话文件命名：`{blockId}.json`，blockId 使用 UUID
+
+#### 3.2.4.7 与 AI 分析面板的交互
+
+```
+BlockEditor                    AIAnalysisPanel              SessionManager
+     │                             │                             │
+     │  用户点击 Block              │                             │
+     │─────────────────────────────>│                             │
+     │                             │                             │
+     │                             │  setActiveBlock(blockId)    │
+     │                             │─────────────────────────────>│
+     │                             │                             │
+     │                             │  getOrCreateSession(blockId) │
+     │                             │  返回 BlockSession           │
+     │                             │<─────────────────────────────│
+     │                             │                             │
+     │                             │  renderSession(session)       │
+     │  显示历史对话                │                             │
+     │<─────────────────────────────│                             │
+     │                             │                             │
+     │  用户发送消息                │                             │
+     │─────────────────────────────>│                             │
+     │                             │                             │
+     │                             │  addMessage(blockId, msg)    │
+     │                             │─────────────────────────────>│
+     │                             │  保存到文件                  │
+     │                             │<─────────────────────────────│
+     │                             │                             │
+```
+
+#### 3.2.4.8 LangGraph 集成
+
+当 `useLangGraph: true` 时，使用 LangGraph Agent 处理对话：
+
+```typescript
+class LangGraphAgent {
+  async startBlockAnalysis(blockId: string, content: string): Promise<ConversationResult>;
+  async continueAnalysis(blockId: string, userMessage: string): Promise<ConversationResult>;
+}
+```
+
+LangGraph Agent 内部也会调用 SessionManager 保存消息，确保 SessionManager 是唯一的会话数据源。
+
+#### 3.2.4.9 错误处理
+
+| 错误场景 | 处理方式 |
+|---------|---------|
+| `app.vault` undefined | 确保 SessionManager 构造时传入 app 实例 |
+| 文件已存在 | 使用 `adapter.write` 而非 `create` |
+| 会话不存在 | `getOrCreateSession` 自动创建 |
+| JSON 解析失败 | 跳过损坏的文件，记录日志 |
+
+### 3.2.5 AI 分析面板 UI
 
 右侧 AI 分析面板的输入区设计：
 

@@ -1,13 +1,101 @@
 /**
  * Session Manager
- * Manages per-block AI conversation sessions
+ * Manages per-block AI conversation sessions with vault persistence
  */
 
+import { App, TFile } from 'obsidian';
 import { BlockSession, AnalysisPhase, ChatMessage, AnalysisResult } from '../entities/types';
+
+const SESSIONS_FOLDER = '.lifewiki/sessions';
 
 export class SessionManager {
 	private sessions: Map<string, BlockSession> = new Map();
 	private activeBlockId: string | null = null;
+	private app: App;
+	private saveDebounceTimer: NodeJS.Timeout | null = null;
+
+	constructor(app: App) {
+		this.app = app;
+	}
+
+	/**
+	 * Initialize - load all sessions from vault
+	 */
+	async initialize(): Promise<void> {
+		await this.ensureFolder();
+		await this.loadAllSessions();
+	}
+
+	/**
+	 * Ensure the sessions folder exists
+	 */
+	private async ensureFolder(): Promise<void> {
+		const folder = this.app.vault.getAbstractFileByPath(SESSIONS_FOLDER);
+		if (!folder || folder instanceof TFile) {
+			try {
+				await this.app.vault.createFolder(SESSIONS_FOLDER);
+			} catch (e) {
+				// Folder might already exist from a concurrent call
+				if ((e as Error).message !== 'Folder already exists.') {
+					throw e;
+				}
+			}
+		}
+	}
+
+	/**
+	 * Load all sessions from vault
+	 */
+	private async loadAllSessions(): Promise<void> {
+		const folder = this.app.vault.getAbstractFileByPath(SESSIONS_FOLDER);
+		if (!folder || folder instanceof TFile) {
+			console.log('[SessionManager] No sessions folder found, starting fresh');
+			return;
+		}
+
+		let loadedCount = 0;
+		for (const file of folder.children) {
+			if (file instanceof TFile && file.extension === 'json') {
+				try {
+					const content = await this.app.vault.read(file);
+					const session: BlockSession = JSON.parse(content);
+					this.sessions.set(session.blockId, session);
+					loadedCount++;
+					console.log(`[SessionManager] Loaded session ${file.name}: messages=${session.messages.length}`);
+				} catch (e) {
+					console.error(`[SessionManager] Failed to load session ${file.name}:`, e);
+				}
+			}
+		}
+		console.log(`[SessionManager] Loaded ${loadedCount} sessions from vault`);
+	}
+
+	/**
+	 * Save a session to vault immediately
+	 */
+	private async saveSession(blockId: string): Promise<void> {
+		const session = this.sessions.get(blockId);
+		if (!session) return;
+
+		// Cancel any pending debounced save
+		if (this.saveDebounceTimer) {
+			clearTimeout(this.saveDebounceTimer);
+			this.saveDebounceTimer = null;
+		}
+
+		try {
+			const filePath = `${SESSIONS_FOLDER}/${blockId}.json`;
+			// Clone the session to avoid reference issues
+			const sessionClone = JSON.parse(JSON.stringify(session));
+			const content = JSON.stringify(sessionClone, null, 2);
+
+			// Use adapter.write which creates or overwrites atomically
+			await this.app.vault.adapter.write(filePath, content);
+			console.log(`[SessionManager] Saved session ${blockId}, messages: ${session.messages.length}`);
+		} catch (e) {
+			console.error(`[SessionManager] Failed to save session ${blockId}:`, e);
+		}
+	}
 
 	/**
 	 * Get or create a session for a block
@@ -19,6 +107,7 @@ export class SessionManager {
 			const now = new Date().toISOString();
 			session = {
 				blockId,
+				content: '',
 				messages: [],
 				analysisResult: null,
 				createdAt: now,
@@ -26,6 +115,7 @@ export class SessionManager {
 				currentPhase: AnalysisPhase.People
 			};
 			this.sessions.set(blockId, session);
+			this.saveSession(blockId);
 		}
 
 		return session;
@@ -47,6 +137,7 @@ export class SessionManager {
 
 		session.messages.push(message);
 		session.updatedAt = new Date().toISOString();
+		this.saveSession(blockId);
 
 		return session;
 	}
@@ -60,6 +151,7 @@ export class SessionManager {
 
 		session.currentPhase = phase;
 		session.updatedAt = new Date().toISOString();
+		this.saveSession(blockId);
 
 		return true;
 	}
@@ -73,6 +165,21 @@ export class SessionManager {
 
 		session.analysisResult = result;
 		session.updatedAt = new Date().toISOString();
+		this.saveSession(blockId);
+
+		return true;
+	}
+
+	/**
+	 * Set the content for a session
+	 */
+	setContent(blockId: string, content: string): boolean {
+		const session = this.sessions.get(blockId);
+		if (!session) return false;
+
+		session.content = content;
+		session.updatedAt = new Date().toISOString();
+		this.saveSession(blockId);
 
 		return true;
 	}
@@ -80,14 +187,32 @@ export class SessionManager {
 	/**
 	 * Clear a specific session
 	 */
-	clearSession(blockId: string): boolean {
-		return this.sessions.delete(blockId);
+	async clearSession(blockId: string): Promise<boolean> {
+		const deleted = this.sessions.delete(blockId);
+		if (deleted) {
+			// Also delete from vault
+			const filePath = `${SESSIONS_FOLDER}/${blockId}.json`;
+			const file = this.app.vault.getAbstractFileByPath(filePath);
+			if (file instanceof TFile) {
+				await this.app.vault.delete(file);
+			}
+		}
+		return deleted;
 	}
 
 	/**
 	 * Clear all sessions
 	 */
-	clearAllSessions(): void {
+	async clearAllSessions(): Promise<void> {
+		// Delete all session files from vault
+		const folder = this.app.vault.getAbstractFileByPath(SESSIONS_FOLDER);
+		if (folder && folder instanceof TFile === false) {
+			for (const file of folder.children) {
+				if (file instanceof TFile) {
+					await this.app.vault.delete(file);
+				}
+			}
+		}
 		this.sessions.clear();
 		this.activeBlockId = null;
 	}
