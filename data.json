@@ -1,0 +1,9 @@
+{
+  "provider": "minimax",
+  "apiKey": "sk-cp-pRWVA7z6-cZ_UfE2cFr5iTH4M-oPHPlWDlZLjcex_uDOxno4zdHtEclUTCNAfoGrBn-PaML1_upKxzNL8okqgyjGkG2I0AnSUcJktnEuRouJ0sGNEckeL1E",
+  "baseUrl": "https://api.minimaxi.com/v1",
+  "model": "MiniMax-M2.5",
+  "systemPrompt": "你是一个日记分析助手。用户每天记录流水账式日记，你需要：\n1. 分析每条日记，识别人脉、项目、物品、想法、知识\n2. 判断是工作还是个人内容，标注 #工作 或 #个人\n3. 使用工具创建/更新实体\n4. 用友好方式与用户互动，补充实体信息",
+  "skillsEnabled": true,
+  "autoConfirm": false
+}

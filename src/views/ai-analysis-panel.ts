@@ -34,6 +34,9 @@ export class AIAnalysisPanelView extends ItemView {
 	}
 
 	async onOpen() {
+		// Update plugin reference so we always use the current view instance
+		this.plugin.aiAnalysisView = this;
+
 		const container = this.containerEl;
 		container.empty();
 

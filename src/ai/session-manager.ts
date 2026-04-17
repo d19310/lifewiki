@@ -35,9 +35,9 @@ export class SessionManager {
 			try {
 				await this.app.vault.createFolder(SESSIONS_FOLDER);
 			} catch (e) {
-				// Folder might already exist from a concurrent call
+				// Folder might already exist - that's fine
 				if ((e as Error).message !== 'Folder already exists.') {
-					throw e;
+					console.warn('[SessionManager] ensureFolder error:', e);
 				}
 			}
 		}
@@ -47,27 +47,25 @@ export class SessionManager {
 	 * Load all sessions from vault
 	 */
 	private async loadAllSessions(): Promise<void> {
-		const folder = this.app.vault.getAbstractFileByPath(SESSIONS_FOLDER);
-		if (!folder || folder instanceof TFile) {
-			console.log('[SessionManager] No sessions folder found, starting fresh');
-			return;
-		}
-
 		let loadedCount = 0;
-		for (const file of folder.children) {
-			if (file instanceof TFile && file.extension === 'json') {
+
+		try {
+			const files = await this.app.vault.adapter.list(SESSIONS_FOLDER);
+			const sessionFiles = files.files.filter(f => f.endsWith('.json'));
+
+			for (const filePath of sessionFiles) {
 				try {
-					const content = await this.app.vault.read(file);
+					const content = await this.app.vault.adapter.read(filePath);
 					const session: BlockSession = JSON.parse(content);
 					this.sessions.set(session.blockId, session);
 					loadedCount++;
-					console.log(`[SessionManager] Loaded session ${file.name}: messages=${session.messages.length}`);
 				} catch (e) {
-					console.error(`[SessionManager] Failed to load session ${file.name}:`, e);
+					console.error(`[SessionManager] Failed to load session ${filePath}:`, e);
 				}
 			}
+		} catch (e) {
+			// Folder might not exist yet
 		}
-		console.log(`[SessionManager] Loaded ${loadedCount} sessions from vault`);
 	}
 
 	/**

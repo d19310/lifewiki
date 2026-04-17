@@ -71,7 +71,7 @@ export class MiniMaxProvider {
         content: m.content
       })),
       temperature: 0.7,
-      max_tokens: 1000
+      max_tokens: 500
     };
 
     try {
@@ -122,111 +122,69 @@ export class MiniMaxProvider {
     const blockId = this.generateId();
     const timestamp = new Date().toISOString();
 
-    const systemPrompt = `你是一个日记分析助手。请分析以下日记内容，识别人脉、项目、物品、想法和知识。
+    const systemPrompt = `你是一个日记分析助手，专门帮助用户从日常日记中识别和归档实体。
+
+## 你的任务
+分析用户输入的日记内容，识别人脉（人）、项目/任务（事）、物品（物）、想法（想法）、知识（知识）。
+
+## 对话规则
+1. 每次只分析和确认一个大类的实体，按顺序：人脉 → 项目/任务 → 物品 → 想法 → 知识
+2. 用 **加粗** 格式标注实体名称
+3. 回复简洁自然，不超过 100 字
+4. **不要输出任何 [ENTITY_DATA:...] 标记**，这会由后续流程处理
+
+## 识别未归档实体（不认识）
+当发现未在已归档实体中找到的名称时，询问确认类型：
+> 你提到的 **张三**、**李四** 我不认识，请问他们是你的同事还是客户？
+
+## 识别已归档实体（认识）
+当在已归档实体中找到匹配时，更新互动记录：
+> **王五** 我认识，他是青岛移动B300项目的对接人。更新了和他的互动记录，关于他还有什么需要补充的吗？
+
+## 确认归档
+用户确认类型后：
+> 好的，已完成 **张三**、**李四** 的人脉归档。还有信息需要补充吗？
+
+## 开始分析
+请分析以下日记内容，先识别人脉实体（只问人脉，不要问其他类别）：
 
 日记内容：
-${content}
-
-请以JSON格式返回分析结果，包含：
-- category: 工作/个人
-- entities: 识别的实体（人脉/项目/物品/想法/知识）
-- needsConfirmation: 需要用户确认的实体名称数组
-- response: 对用户的简短回复（100字以内）
-
-JSON格式：
-{
-  "category": "工作",
-  "entities": {
-    "people": [{"name": "姓名", "confidence": 0.9, "context": "上下文"}],
-    "projects": [],
-    "things": [],
-    "ideas": [],
-    "knowledge": []
-  },
-  "needsConfirmation": [],
-  "response": "简短回复"
-}`;
+${content}`;
 
     const response = await this.chat([
       { role: 'system', content: systemPrompt },
-      { role: 'user', content: `分析这条日记：${content}` }
+      { role: 'user', content: content }
     ]);
 
     return this.parseAnalysisResponse(response.content, blockId, timestamp);
   }
 
   private parseAnalysisResponse(content: string, blockId: string, timestamp: string): AnalysisResult {
-    let category: '工作' | '个人' | '待确认' = '待确认';
-    let entities = {
-      people: [] as EntityPreview[],
-      projects: [] as EntityPreview[],
-      things: [] as EntityPreview[],
-      ideas: [] as EntityPreview[],
-      knowledge: [] as EntityPreview[]
-    };
-    let needsConfirmation: string[] = [];
-    let response = content;
-
-    try {
-      const jsonMatch = content.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        const json = JSON.parse(jsonMatch[0]);
-        category = ['工作', '个人'].includes(json.category) ? json.category : '待确认';
-        entities = {
-          people: (json.entities?.people || []).map((e: any) => ({
-            name: e.name,
-            type: 'person' as const,
-            confidence: e.confidence || 0.5,
-            context: e.context || '',
-            isArchived: false,
-            newEntity: true
-          })),
-          projects: (json.entities?.projects || []).map((e: any) => ({
-            name: e.name,
-            type: 'project' as const,
-            confidence: e.confidence || 0.5,
-            context: e.context || '',
-            isArchived: false,
-            newEntity: true
-          })),
-          things: (json.entities?.things || []).map((e: any) => ({
-            name: e.name,
-            type: 'thing' as const,
-            confidence: e.confidence || 0.5,
-            context: e.context || '',
-            isArchived: false,
-            newEntity: true
-          })),
-          ideas: (json.entities?.ideas || []).map((e: any) => ({
-            name: e.name,
-            type: 'idea' as const,
-            confidence: e.confidence || 0.5,
-            context: e.context || '',
-            isArchived: false,
-            newEntity: true
-          })),
-          knowledge: (json.entities?.knowledge || []).map((e: any) => ({
-            name: e.name,
-            type: 'knowledge' as const,
-            confidence: e.confidence || 0.5,
-            context: e.context || '',
-            isArchived: false,
-            newEntity: true
-          }))
-        };
-        needsConfirmation = json.needsConfirmation || [];
-        response = json.response || content;
-      }
-    } catch (error) {
-      console.error('Failed to parse AI response:', error);
-    }
+    // Simply remove ENTITY_DATA block and use the text for display
+    // Entity extraction is handled by conversation flow via [ENTITY:], [ARCHIVE:] markers
+    let response = content
+      .replace(/<think>[\s\S]*?<\/think>/gi, '')
+      .replace(/<THINKING>[\s\S]*?<\/THINKING>/gi, '')
+      .replace(/<思考>[\s\S]*?<\/思考>/gi, '')
+      .replace(/<note>[\s\S]*?<\/note>/gi, '')
+      .replace(/<备注>[\s\S]*?<\/备注>/gi, '')
+      // Remove ENTITY_DATA block using regex - everything from [ENTITY_DATA: to the closing ]
+      .replace(/\[ENTITY_DATA:\[[\s\S]*?\]/gi, '')
+      .replace(/\[ENTITY_DATA:\{[\s\S]*?\}/gi, '')
+      .trim();
 
     return {
       blockId,
       timestamp,
-      category,
-      entities,
-      needsConfirmation,
+      category: '待确认',
+      entities: {
+        people: [],
+        projects: [],
+        things: [],
+        ideas: [],
+        knowledge: []
+      },
+      needsConfirmation: [],
       aiResponse: response
     };
   }

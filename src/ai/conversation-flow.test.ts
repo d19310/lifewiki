@@ -28,19 +28,9 @@ describe('ConversationFlow', () => {
 			const blockId = 'block-001';
 			const content = '今天和张三、李四讨论了项目';
 
-			provider.analyzeBlock.mockResolvedValue({
-				blockId,
-				timestamp: new Date().toISOString(),
-				category: '工作' as const,
-				entities: {
-					people: [{ type: 'person' as const, name: '张三', confidence: 0.9, context: '提及', isArchived: false }] as EntityPreview[],
-					projects: [] as EntityPreview[],
-					things: [] as EntityPreview[],
-					ideas: [] as EntityPreview[],
-					knowledge: [] as EntityPreview[]
-				},
-				needsConfirmation: ['张三'],
-				aiResponse: '你提到的 **张三** 我不认识'
+			provider.chat.mockResolvedValue({
+				content: '你提到的 **张三** 我不认识',
+				usage: { promptTokens: 10, completionTokens: 20, totalTokens: 30 }
 			});
 
 			const result = await flow.startBlockAnalysis(blockId, content);
@@ -49,25 +39,15 @@ describe('ConversationFlow', () => {
 			expect(result.session.blockId).toBe(blockId);
 			expect(result.session.currentPhase).toBe(AnalysisPhase.People);
 			expect(result.initialResponse).toContain('张三');
-			expect(provider.analyzeBlock).toHaveBeenCalled();
+			expect(provider.chat).toHaveBeenCalled();
 		});
 
 		it('should create new session if none exists', async () => {
 			const blockId = 'block-new';
 
-			provider.analyzeBlock.mockResolvedValue({
-				blockId,
-				timestamp: new Date().toISOString(),
-				category: '工作' as const,
-				entities: {
-					people: [] as EntityPreview[],
-					projects: [] as EntityPreview[],
-					things: [] as EntityPreview[],
-					ideas: [] as EntityPreview[],
-					knowledge: [] as EntityPreview[]
-				},
-				needsConfirmation: [],
-				aiResponse: '未识别到实体'
+			provider.chat.mockResolvedValue({
+				content: '未识别到实体',
+				usage: { promptTokens: 10, completionTokens: 20, totalTokens: 30 }
 			});
 
 			const result = await flow.startBlockAnalysis(blockId, '测试内容');
@@ -123,19 +103,9 @@ describe('ConversationFlow', () => {
 		it('should start at people phase', async () => {
 			const blockId = 'block-phase';
 
-			provider.analyzeBlock.mockResolvedValue({
-				blockId,
-				timestamp: new Date().toISOString(),
-				category: '工作' as const,
-				entities: {
-					people: [] as EntityPreview[],
-					projects: [] as EntityPreview[],
-					things: [] as EntityPreview[],
-					ideas: [] as EntityPreview[],
-					knowledge: [] as EntityPreview[]
-				},
-				needsConfirmation: [],
-				aiResponse: '未识别到人脉'
+			provider.chat.mockResolvedValue({
+				content: '未识别到人脉',
+				usage: { promptTokens: 10, completionTokens: 20, totalTokens: 30 }
 			});
 
 			const result = await flow.startBlockAnalysis(blockId, '测试');
@@ -146,19 +116,9 @@ describe('ConversationFlow', () => {
 		it('should track phase in session', async () => {
 			const blockId = 'block-phase-track';
 
-			provider.analyzeBlock.mockResolvedValue({
-				blockId,
-				timestamp: new Date().toISOString(),
-				category: '工作' as const,
-				entities: {
-					people: [] as EntityPreview[],
-					projects: [] as EntityPreview[],
-					things: [] as EntityPreview[],
-					ideas: [] as EntityPreview[],
-					knowledge: [] as EntityPreview[]
-				},
-				needsConfirmation: [],
-				aiResponse: '完成'
+			provider.chat.mockResolvedValue({
+				content: '完成',
+				usage: { promptTokens: 10, completionTokens: 20, totalTokens: 30 }
 			});
 
 			await flow.startBlockAnalysis(blockId, '测试');
@@ -172,19 +132,9 @@ describe('ConversationFlow', () => {
 		it('should accumulate messages in session', async () => {
 			const blockId = 'block-msgs';
 
-			provider.analyzeBlock.mockResolvedValue({
-				blockId,
-				timestamp: new Date().toISOString(),
-				category: '工作' as const,
-				entities: {
-					people: [] as EntityPreview[],
-					projects: [] as EntityPreview[],
-					things: [] as EntityPreview[],
-					ideas: [] as EntityPreview[],
-					knowledge: [] as EntityPreview[]
-				},
-				needsConfirmation: [],
-				aiResponse: '你好'
+			provider.chat.mockResolvedValue({
+				content: '你好',
+				usage: { promptTokens: 5, completionTokens: 5, totalTokens: 10 }
 			});
 
 			await flow.startBlockAnalysis(blockId, '你好');
@@ -202,8 +152,10 @@ describe('ConversationFlow', () => {
 			await flow.continueAnalysis(blockId, '用户消息2');
 
 			const session = flow.getSession(blockId);
-			// 1 initial AI + 1 user msg1 + 1 AI response1 + 1 user msg2 + 1 AI response2 = 5
-			expect(session?.messages.length).toBe(5);
+			// startBlockAnalysis: 1 user msg (diary) + 1 AI response = 2
+			// continueAnalysis 1: 1 user msg + 1 AI response = 2 (total 4)
+			// continueAnalysis 2: 1 user msg + 1 AI response = 2 (total 6)
+			expect(session?.messages.length).toBe(6);
 		});
 	});
 
@@ -211,19 +163,9 @@ describe('ConversationFlow', () => {
 		it('should return existing session', async () => {
 			const blockId = 'block-get';
 
-			provider.analyzeBlock.mockResolvedValue({
-				blockId,
-				timestamp: new Date().toISOString(),
-				category: '工作' as const,
-				entities: {
-					people: [] as EntityPreview[],
-					projects: [] as EntityPreview[],
-					things: [] as EntityPreview[],
-					ideas: [] as EntityPreview[],
-					knowledge: [] as EntityPreview[]
-				},
-				needsConfirmation: [],
-				aiResponse: 'test'
+			provider.chat.mockResolvedValue({
+				content: 'test',
+				usage: { promptTokens: 5, completionTokens: 5, totalTokens: 10 }
 			});
 
 			await flow.startBlockAnalysis(blockId, 'test');
