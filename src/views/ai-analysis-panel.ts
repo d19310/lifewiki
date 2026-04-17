@@ -5,8 +5,7 @@
 
 import { ItemView, WorkspaceLeaf, setIcon } from 'obsidian';
 import type LifeWikiPlugin from '../main';
-import { AnalysisResult, BlockSession, ChatMessage, AnalysisPhase } from '../entities/types';
-import '../styles/ai-panel.css';
+import { AnalysisResult, BlockSession, ChatMessage } from '../entities/types';
 
 export const VIEW_TYPE_AI_ANALYSIS = 'lifewiki-ai-analysis';
 
@@ -18,7 +17,6 @@ export class AIAnalysisPanelView extends ItemView {
 	private sendBtnEl: HTMLElement | null = null;
 	private isLoading: boolean = false;
 	private emptyStateEl: HTMLElement | null = null;
-	private phaseIndicatorEl: HTMLElement | null = null;
 	private pendingEntities: Array<{ name: string; inferredType: string; reason: string }> = [];
 	private thinkingEl: HTMLElement | null = null;
 
@@ -39,6 +37,9 @@ export class AIAnalysisPanelView extends ItemView {
 		const container = this.containerEl;
 		container.empty();
 
+		// Add styles AFTER container.empty() so they aren't wiped out
+		this.addStyles();
+
 		// Main panel container
 		const mainContainer = container.createEl('div', {
 			cls: 'lifewiki-ai-panel'
@@ -54,11 +55,6 @@ export class AIAnalysisPanelView extends ItemView {
 			cls: 'lifewiki-ai-header-title'
 		});
 		headerTitle.createEl('span', { text: 'AI 洞察' });
-
-		// Phase indicator
-		this.phaseIndicatorEl = header.createEl('div', {
-			cls: 'lifewiki-phase-indicator'
-		});
 
 		// Header actions
 		const headerActions = header.createEl('div', {
@@ -80,33 +76,14 @@ export class AIAnalysisPanelView extends ItemView {
 			cls: 'lifewiki-ai-scroll'
 		});
 
-		// Empty state
+		// Empty state - simple text only
 		this.emptyStateEl = scrollContent.createEl('div', {
 			cls: 'lifewiki-empty-state'
 		});
 
-		// Empty state icon (using SVG)
-		const emptyIcon = this.emptyStateEl.createEl('svg', {
-			cls: 'lifewiki-empty-state-icon',
-			attr: {
-				'viewBox': '0 0 24 24',
-				'fill': 'none',
-				'stroke': 'currentColor',
-				'stroke-width': '1.5',
-				'stroke-linecap': 'round',
-				'stroke-linejoin': 'round'
-			}
-		});
-		emptyIcon.createEl('path', { attr: { d: 'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z' } });
-
-		this.emptyStateEl.createEl('div', {
+		this.emptyStateEl.createEl('span', {
 			cls: 'lifewiki-empty-state-title',
 			text: '选择或输入一条日记'
-		});
-
-		this.emptyStateEl.createEl('div', {
-			cls: 'lifewiki-empty-state-desc',
-			text: 'AI 将帮你分析和归档实体'
 		});
 
 		// Chat messages area
@@ -124,20 +101,6 @@ export class AIAnalysisPanelView extends ItemView {
 			cls: 'lifewiki-chat-input-wrapper'
 		});
 
-		// Model selector row
-		const modelSelector = inputWrapper.createEl('div', {
-			cls: 'lifewiki-model-selector'
-		});
-
-		const modelSelect = modelSelector.createEl('select', {
-			cls: 'lifewiki-model-select'
-		});
-
-		const models = ['MiniMax', 'OpenAI', 'Claude', 'Ollama'];
-		for (const model of models) {
-			modelSelect.createEl('option', { text: model, value: model.toLowerCase() });
-		}
-
 		// Input row with textarea and send button
 		const inputRow = inputWrapper.createEl('div', {
 			cls: 'lifewiki-input-row'
@@ -147,7 +110,7 @@ export class AIAnalysisPanelView extends ItemView {
 		this.inputTextarea = inputRow.createEl('textarea', {
 			cls: 'lifewiki-input-textarea',
 			attr: {
-				placeholder: '输入消息...',
+				placeholder: 'Ask context...',
 				rows: '1'
 			}
 		}) as HTMLTextAreaElement;
@@ -199,6 +162,51 @@ export class AIAnalysisPanelView extends ItemView {
 		if (!this.sendBtnEl || !this.inputTextarea) return;
 		const hasContent = this.inputTextarea.value.trim().length > 0 && !this.isLoading;
 		this.sendBtnEl.classList.toggle('active', hasContent);
+	}
+
+	private addStyles() {
+		const styleEl = document.createElement('style');
+		styleEl.textContent = `
+			/* AI Analysis Panel Styles - FORCED */
+			.lifewiki-chat-msg.assistant {
+				align-self: flex-start !important;
+				background: #ffffff !important;
+				color: #1a1c1c !important;
+				border-radius: 12px !important;
+				border: 1px solid rgba(204, 195, 214, 0.15) !important;
+				box-shadow: 0 4px 20px -4px rgba(26, 28, 28, 0.04) !important;
+				max-width: 80% !important;
+				padding: 12px 16px !important;
+			}
+
+			.lifewiki-chat-msg.user {
+				align-self: flex-end !important;
+				background: #e8e8e8 !important;
+				color: #1a1c1c !important;
+				border-radius: 12px !important;
+				border: 1px solid rgba(204, 195, 214, 0.15) !important;
+				max-width: 80% !important;
+				padding: 12px 16px !important;
+			}
+
+			.lifewiki-chat-messages {
+				display: flex !important;
+				flex-direction: column !important;
+				gap: 16px !important;
+				padding-bottom: 16px !important;
+				background: transparent !important;
+			}
+
+			/* Empty State - Remove white rectangle */
+			.lifewiki-empty-state {
+				background: transparent !important;
+				border: none !important;
+				border-radius: 0 !important;
+				box-shadow: none !important;
+				padding: 24px !important;
+			}
+		`;
+		this.containerEl.appendChild(styleEl);
 	}
 
 	private showEmptyState() {
@@ -301,7 +309,7 @@ export class AIAnalysisPanelView extends ItemView {
 		this.showChatState();
 
 		const msgEl = this.chatMessagesEl.createEl('div', {
-			cls: `lifewiki-chat-msg lifewiki-chat-msg-${role}`
+			cls: `lifewiki-chat-msg ${role}`
 		});
 
 		if (role === 'assistant') {
@@ -370,10 +378,6 @@ export class AIAnalysisPanelView extends ItemView {
 			if (result.entityDiscovery && result.entityDiscovery.length > 0) {
 				this.pendingEntities = result.entityDiscovery;
 				await this.showEntityConfirmationDialog(result.entityDiscovery);
-			}
-
-			if (result.session?.currentPhase) {
-				this.updatePhaseIndicator(result.session.currentPhase);
 			}
 
 			if (result.archivedEntities && result.archivedEntities.length > 0) {
@@ -542,20 +546,6 @@ export class AIAnalysisPanelView extends ItemView {
 				console.error(`[AIAnalysisPanel] Failed to create relation:`, error);
 			}
 		}
-	}
-
-	private updatePhaseIndicator(phase: AnalysisPhase) {
-		if (!this.phaseIndicatorEl) return;
-		const phaseLabels: Record<string, string> = {
-			people: '👤 人脉',
-			projects: '📋 项目',
-			things: '📦 物品',
-			ideas: '💡 想法',
-			knowledge: '📚 知识',
-			complete: '✅ 完成'
-		};
-		this.phaseIndicatorEl.setText(phaseLabels[phase] || phase);
-		this.phaseIndicatorEl.addClass('visible');
 	}
 
 	private async showEntityConfirmationDialog(entities: Array<{ name: string; inferredType: string; reason: string }>) {

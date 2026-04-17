@@ -9,5 +9,5 @@
   "fundingUrl": "",
   "isDesktopOnly": false,
   "js": "main.js",
-  "styles": ["styles.css"]
+  "styles": ["main.css"]
 }
