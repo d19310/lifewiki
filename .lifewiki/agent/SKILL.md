@@ -182,3 +182,78 @@
   ]
 }
 ```
+
+### clip_webpage
+抓取网页内容并转换为 Markdown 格式。支持普通网站和微信公众号文章。
+
+**输入**:
+```json
+{
+  "url": "https://example.com/article"
+}
+```
+
+**输出**:
+```json
+{
+  "success": true,
+  "title": "文章标题",
+  "content": "# Markdown 内容...",
+  "author": "作者名称",
+  "siteName": "网站名称",
+  "url": "https://example.com/article",
+  "clippedAt": "2026-04-15T10:00:00Z",
+  "truncated": false,
+  "preview": "内容前500字符..."
+}
+```
+
+### summarize_content
+使用 AI 总结 Markdown 内容。返回简洁的中文摘要（100-200字）。
+
+**输入**:
+```json
+{
+  "content": "# Markdown 内容...",
+  "title": "文章标题（可选）",
+  "url": "https://example.com（可选）",
+  "author": "作者名称（可选）"
+}
+```
+
+**输出**:
+```json
+{
+  "success": true,
+  "summary": "这是一篇关于XXX的文章，主要讨论了...",
+  "originalLength": 5000,
+  "title": "文章标题"
+}
+```
+
+### clip_and_summarize
+一站式抓取网页并总结。比单独调用 clip_webpage 和 summarize_content 更高效。
+
+**输入**:
+```json
+{
+  "url": "https://example.com/article"
+}
+```
+
+**输出**:
+```json
+{
+  "success": true,
+  "clipped": true,
+  "summarized": true,
+  "title": "文章标题",
+  "content": "# Markdown 内容...",
+  "summary": "这是一篇关于XXX的文章...",
+  "url": "https://example.com/article",
+  "author": "作者名称",
+  "siteName": "网站名称",
+  "clippedAt": "2026-04-15T10:00:00Z",
+  "originalLength": 5000
+}
+```

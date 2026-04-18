@@ -11,6 +11,7 @@
 import { AIMessage, ToolMessage, BaseMessage, HumanMessage } from '@langchain/core/messages';
 import type { AIProviderAdapter } from './adapter';
 import type { EntityTools } from './tools/entity-tools';
+import type { WebClipperTools } from './tools/web-clipper-tools';
 import { AnalysisPhase as Phase } from '../../entities/types';
 
 // Tool definitions
@@ -113,6 +114,42 @@ const TOOLS = [
 			},
 			required: ['entityId']
 		}
+	},
+	{
+		name: 'clip_webpage',
+		description: 'Clip a webpage and convert to Markdown. Supports generic websites and WeChat articles. Returns title, content, author, and site name.',
+		parameters: {
+			type: 'object',
+			properties: {
+				url: { type: 'string', description: 'URL of the webpage to clip' }
+			},
+			required: ['url']
+		}
+	},
+	{
+		name: 'summarize_content',
+		description: 'Summarize Markdown content using AI. Returns a concise summary (100-200 characters).',
+		parameters: {
+			type: 'object',
+			properties: {
+				content: { type: 'string', description: 'Markdown content to summarize' },
+				title: { type: 'string', description: 'Optional title of the content' },
+				url: { type: 'string', description: 'Optional source URL' },
+				author: { type: 'string', description: 'Optional author name' }
+			},
+			required: ['content']
+		}
+	},
+	{
+		name: 'clip_and_summarize',
+		description: 'Clip a webpage and summarize its content in one step. This is more efficient than calling clip_webpage and summarize_content separately.',
+		parameters: {
+			type: 'object',
+			properties: {
+				url: { type: 'string', description: 'URL of the webpage to clip and summarize' }
+			},
+			required: ['url']
+		}
 	}
 ];
 
@@ -178,6 +215,7 @@ export class BlockAnalysisMachine {
 	private state: AnalysisState;
 	private llm: AIProviderAdapter;
 	private tools: EntityTools;
+	private webClipperTools?: WebClipperTools;
 	private systemPrompt: string;
 	private recentFunctionCalls: Array<{ name: string; args: string }> = [];
 
@@ -185,12 +223,14 @@ export class BlockAnalysisMachine {
 		state: AnalysisState,
 		llm: AIProviderAdapter,
 		tools: EntityTools,
-		systemPrompt: string
+		systemPrompt: string,
+		webClipperTools?: WebClipperTools
 	) {
 		this.state = state;
 		this.llm = llm;
 		this.tools = tools;
 		this.systemPrompt = systemPrompt;
+		this.webClipperTools = webClipperTools;
 	}
 
 	/**
@@ -408,6 +448,21 @@ ${this.state.messages.slice(-4).map((m: any) => {
 				case 'get_entity_history':
 					result = await this.tools.getEntityHistory(call.args);
 					break;
+				case 'clip_webpage':
+					result = this.webClipperTools
+						? await this.webClipperTools.clipWebpageTool(call.args)
+						: { success: false, error: 'Web clipper not available' };
+					break;
+				case 'summarize_content':
+					result = this.webClipperTools
+						? await this.webClipperTools.summarizeContentTool(call.args)
+						: { success: false, error: 'Web clipper not available' };
+					break;
+				case 'clip_and_summarize':
+					result = this.webClipperTools
+						? await this.webClipperTools.clipAndSummarize(call.args)
+						: { success: false, error: 'Web clipper not available' };
+					break;
 				default:
 					result = { success: false, error: `Unknown tool: ${call.name}` };
 			}
@@ -478,6 +533,21 @@ ${this.state.messages.slice(-4).map((m: any) => {
 				case 'get_entity_history':
 					result = await this.tools.getEntityHistory(args);
 					break;
+				case 'clip_webpage':
+					result = this.webClipperTools
+						? await this.webClipperTools.clipWebpageTool(args)
+						: { success: false, error: 'Web clipper not available' };
+					break;
+				case 'summarize_content':
+					result = this.webClipperTools
+						? await this.webClipperTools.summarizeContentTool(args)
+						: { success: false, error: 'Web clipper not available' };
+					break;
+				case 'clip_and_summarize':
+					result = this.webClipperTools
+						? await this.webClipperTools.clipAndSummarize(args)
+						: { success: false, error: 'Web clipper not available' };
+					break;
 				default:
 					result = { success: false, error: `Unknown tool: ${name}` };
 			}
@@ -534,8 +604,9 @@ export function buildAnalysisMachine(
 	tools: EntityTools,
 	systemPrompt: string,
 	blockId: string,
-	content: string
+	content: string,
+	webClipperTools?: WebClipperTools
 ): BlockAnalysisMachine {
 	const initialState = createInitialState(blockId, content);
-	return new BlockAnalysisMachine(initialState, llm, tools, systemPrompt);
+	return new BlockAnalysisMachine(initialState, llm, tools, systemPrompt, webClipperTools);
 }
