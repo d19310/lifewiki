@@ -3,8 +3,8 @@
  * Pure functions for URL extraction and validation
  */
 
-// URL extraction regex
-const URL_REGEX = /(https?:\/\/[^\s<>"\]\)]+)/g;
+// URL extraction regex - matches http:// or https:// followed by non-whitespace chars
+const URL_REGEX = /(https?:\/\/[^\s<>"']+)/g;
 
 /**
  * Extract all URLs from text

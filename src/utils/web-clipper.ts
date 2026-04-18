@@ -6,8 +6,8 @@
  * - Generic websites using Readability-style extraction
  * - WeChat articles (mp.weixin.qq.com)
  *
- * Note: JSDOM and Turndown are optional dependencies,
- * loaded lazily when needed for generic web clipping.
+ * Uses browser's native DOM APIs for HTML parsing (works in Obsidian/Electron)
+ * Uses Turndown for HTML to Markdown conversion
  */
 
 export interface ClipResult {
@@ -21,21 +21,18 @@ export interface ClipResult {
 	truncated?: boolean;
 }
 
-// Lazy imports for heavy dependencies
-let JSDOM: any;
+// Lazy import for Turndown (browser-compatible)
 let TurndownService: any;
 
-async function loadDependencies() {
-	if (!JSDOM) {
-		const jsdom = await import('jsdom');
-		JSDOM = jsdom.JSDOM;
+async function loadTurndown() {
+	if (!TurndownService) {
 		const turndownModule = await import('turndown');
 		TurndownService = turndownModule.default;
 	}
 }
 
 // URL extraction regex
-const URL_REGEX = /(https?:\/\/[^\s<>"\]\)]+)/g;
+const URL_REGEX = /(https?:\/\/[^\s<>"']+)/g;
 
 /**
  * Extract all URLs from text
@@ -68,6 +65,55 @@ export function isValidURL(url: string): boolean {
 }
 
 /**
+ * Fetch webpage content using native fetch (works in Electron renderer)
+ */
+async function fetchWebpage(url: string): Promise<{ html: string; status: number }> {
+	const response = await fetch(url, {
+		headers: {
+			'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+			Accept: 'text/html,application/xhtml+xml',
+		},
+	});
+
+	if (!response.ok) {
+		throw new Error(`Fetch failed with status ${response.status}`);
+	}
+
+	const html = await response.text();
+	return { html, status: response.status };
+}
+
+/**
+ * Parse HTML using browser's native DOM APIs
+ * Returns a mock document-like object with querySelector
+ */
+function parseHtmlToDOM(html: string): Element {
+	// Create a temporary container and parse HTML
+	const container = document.createElement('div');
+	container.innerHTML = html;
+
+	// Return the container as an Element-like object
+	return container;
+}
+
+/**
+ * Extract text content from an element
+ */
+function getElementText(element: Element): string {
+	return element.textContent || '';
+}
+
+/**
+ * Check if element has substantial content
+ */
+function hasSubstantialContent(element: Element): boolean {
+	const text = element.textContent || '';
+	const paragraphs = element.querySelectorAll('p');
+	// Heuristic: at least 100 chars of text and more than 2 paragraphs
+	return text.trim().length > 100 && paragraphs.length > 2;
+}
+
+/**
  * Main entry point for clipping any URL
  * Dispatches to appropriate clipper based on URL type
  */
@@ -80,6 +126,12 @@ export async function clipWebpage(url: string): Promise<ClipResult> {
 	};
 
 	try {
+		// Validate URL
+		if (!isValidURL(url)) {
+			result.error = 'Invalid URL';
+			return result;
+		}
+
 		// Dispatch to appropriate clipper
 		if (isWechatURL(url)) {
 			return await clipWechatArticle(url);
@@ -92,7 +144,7 @@ export async function clipWebpage(url: string): Promise<ClipResult> {
 }
 
 /**
- * Clip generic website using JSDOM + Readability-style extraction
+ * Clip generic website using browser DOM + Readability-style extraction
  */
 async function clipGenericWebpage(url: string): Promise<ClipResult> {
 	const result: ClipResult = {
@@ -102,28 +154,14 @@ async function clipGenericWebpage(url: string): Promise<ClipResult> {
 		clippedAt: new Date().toISOString(),
 	};
 
-	// Load dependencies lazily
-	await loadDependencies();
+	// Load Turndown lazily
+	await loadTurndown();
 
 	// Fetch webpage
-	const response = await fetch(url, {
-		headers: {
-			'User-Agent':
-				'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-			Accept: 'text/html,application/xhtml+xml',
-		},
-	});
+	const { html } = await fetchWebpage(url);
 
-	if (!response.ok) {
-		result.error = `Fetch failed with status ${response.status}`;
-		return result;
-	}
-
-	const html = await response.text();
-
-	// Parse with JSDOM
-	const dom = new JSDOM(html);
-	const doc = dom.window.document;
+	// Parse HTML using browser DOM
+	const doc = parseHtmlToDOM(html);
 
 	// Extract title
 	result.title = extractTitle(doc);
@@ -137,7 +175,7 @@ async function clipGenericWebpage(url: string): Promise<ClipResult> {
 	// Extract main content using Readability-style extraction
 	const content = extractMainContent(doc);
 
-	// Convert HTML to Markdown
+	// Convert HTML to Markdown using Turndown
 	const turndown = new TurndownService({
 		headingStyle: 'atx',
 		codeBlockStyle: 'fenced',
@@ -164,46 +202,34 @@ async function clipWechatArticle(url: string): Promise<ClipResult> {
 		content: '',
 		url,
 		clippedAt: new Date().toISOString(),
-		error: undefined,
 	};
 
-	// For WeChat, we need to use requestUrl from Obsidian
-	// Since this module may be used outside Obsidian context,
-	// we fall back to a simple regex-based extraction
+	// Load Turndown lazily
+	await loadTurndown();
+
 	try {
-		const response = await fetch(url, {
-			headers: {
-				'User-Agent':
-					'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-				Accept: 'text/html,application/xhtml+xml',
-				Referer: 'https://mp.weixin.qq.com/',
-			},
-		});
+		const { html } = await fetchWebpage(url);
 
-		if (!response.ok) {
-			result.error = `WeChat fetch failed with status ${response.status}`;
-			return result;
-		}
+		// Parse HTML using browser DOM
+		const doc = parseHtmlToDOM(html);
 
-		const html = await response.text();
-
-		// WeChat-specific extraction using regex
+		// WeChat-specific extraction using querySelector
 		// Title: class="rich_media_title"
-		const titleMatch = html.match(/class="rich_media_title"[^>]*>([^<]+)<\/h1>/);
-		if (titleMatch) {
-			result.title = titleMatch[1].trim();
+		const titleEl = doc.querySelector('.rich_media_title');
+		if (titleEl) {
+			result.title = titleEl.textContent?.trim() || '';
 		}
 
 		// Author: id="js_name"
-		const authorMatch = html.match(/id="js_name"[^>]*>([^<]+)<\/strong>/);
-		if (authorMatch) {
-			result.author = authorMatch[1].trim();
+		const authorEl = doc.querySelector('#js_name');
+		if (authorEl) {
+			result.author = authorEl.textContent?.trim() || '';
 		}
 
 		// Content: id="js_content"
-		const contentMatch = html.match(/id="js_content"[^>]*>([\s\S]*?)<div id="js_pc_qr_code"/);
-		if (contentMatch) {
-			let contentHtml = contentMatch[1];
+		const contentEl = doc.querySelector('#js_content');
+		if (contentEl) {
+			let contentHtml = contentEl.innerHTML;
 
 			// Fix lazy loading images: data-src -> src
 			contentHtml = contentHtml.replace(/data-src="/g, 'src="');
@@ -242,7 +268,7 @@ async function clipWechatArticle(url: string): Promise<ClipResult> {
 /**
  * Extract title from document
  */
-function extractTitle(doc: Document): string {
+function extractTitle(doc: Element): string {
 	// Try Open Graph title first
 	const ogTitle = doc.querySelector('meta[property="og:title"]');
 	if (ogTitle?.getAttribute('content')) {
@@ -273,7 +299,7 @@ function extractTitle(doc: Document): string {
 /**
  * Extract author from meta tags
  */
-function extractAuthor(doc: Document): string | undefined {
+function extractAuthor(doc: Element): string | undefined {
 	const authorMeta = doc.querySelector('meta[name="author"]');
 	if (authorMeta?.getAttribute('content')) {
 		return authorMeta.getAttribute('content')!.trim();
@@ -290,7 +316,7 @@ function extractAuthor(doc: Document): string | undefined {
 /**
  * Extract site name from meta tags
  */
-function extractSiteName(doc: Document): string | undefined {
+function extractSiteName(doc: Element): string | undefined {
 	const ogSiteName = doc.querySelector('meta[property="og:site_name"]');
 	if (ogSiteName?.getAttribute('content')) {
 		return ogSiteName.getAttribute('content')!.trim();
@@ -302,7 +328,7 @@ function extractSiteName(doc: Document): string | undefined {
 /**
  * Extract main content from document using Readability-style heuristics
  */
-function extractMainContent(doc: Document): Element {
+function extractMainContent(doc: Element): Element {
 	// Try common content selectors in order
 	const contentSelectors = [
 		'article',
@@ -325,16 +351,5 @@ function extractMainContent(doc: Document): Element {
 	}
 
 	// Fall back to body
-	return doc.body;
-}
-
-/**
- * Check if element has substantial content
- */
-function hasSubstantialContent(element: Element): boolean {
-	const text = element.textContent || '';
-	const paragraphs = element.querySelectorAll('p');
-
-	// Heuristic: at least 100 chars of text and more than 2 paragraphs
-	return text.trim().length > 100 && paragraphs.length > 2;
+	return doc;
 }
