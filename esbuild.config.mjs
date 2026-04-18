@@ -29,6 +29,8 @@ const context = await esbuild.context({
 		"@lezer/common",
 		"@lezer/highlight",
 		"@lezer/lr",
+		"jsdom",
+		"turndown",
 		...builtinModules
 	],
 	format: "cjs",

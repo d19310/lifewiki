@@ -8,6 +8,8 @@ import { AIProvider } from './provider';
 import { SessionManager } from './session-manager';
 import { EntityManager } from '../entities/manager';
 import { loadAgentConfig, AgentConfig } from './agent-config';
+import { clipWebpage } from '../utils/web-clipper';
+import { summarizeContent } from '../utils/summarizer';
 
 export interface ConversationResult {
 	session: BlockSession;
@@ -15,6 +17,8 @@ export interface ConversationResult {
 	userMessage?: string;
 	aiResponse?: string;
 	error?: string;
+	// Areas determined from first AI response
+	areas?: string[];
 	// Entities discovered that need user confirmation
 	entityDiscovery?: Array<{
 		name: string;
@@ -76,19 +80,34 @@ export class ConversationFlow {
 
 	/**
 	 * Start analysis for a new block
+	 * @param blockId - The block ID
+	 * @param content - The block content
+	 * @param parentId - Parent block ID if this is a child block
+	 * @param siblingBlocks - Other sibling blocks' content (for child blocks)
 	 */
-	async startBlockAnalysis(blockId: string, content: string): Promise<ConversationResult> {
-		// Create or get session
-		const session = this.sessionManager.getOrCreateSession(blockId);
+	async startBlockAnalysis(
+		blockId: string,
+		content: string,
+		parentId: string | null = null,
+		siblingBlocks: { id: string; content: string }[] = []
+	): Promise<ConversationResult> {
+		// Create or get session (uses parent's session if child block)
+		const session = this.sessionManager.getOrCreateSession(blockId, parentId);
+
+		// If this is a child block, build extended context with parent content and siblings
+		let analysisContent = content;
+		if (parentId) {
+			analysisContent = this.buildChildBlockContext(blockId, content, parentId, siblingBlocks);
+		}
 
 		// Store the diary content in session
-		this.sessionManager.setContent(blockId, content);
+		this.sessionManager.setContent(blockId, analysisContent, parentId);
 
 		// Add user message (the diary content) to session
 		this.sessionManager.addMessage(blockId, {
 			role: 'user',
-					content: content
-		});
+			content: analysisContent
+		}, parentId);
 
 		// Get existing archived entities from vault to help AI recognize known entities
 		let existingEntities: { name: string; type: string }[] = [];
@@ -122,7 +141,7 @@ export class ConversationFlow {
 		try {
 			const messages = [
 				{ role: 'system' as const, content: systemPrompt },
-				{ role: 'user' as const, content: content }
+				{ role: 'user' as const, content: analysisContent }
 			];
 			let response = await this.provider.chat(messages);
 
@@ -145,12 +164,12 @@ export class ConversationFlow {
 				this.sessionManager.addMessage(blockId, {
 					role: 'assistant',
 					content: processedResponse
-				});
+				}, parentId);
 
 				// Continue conversation with function results injected
 				const continueMessages: ChatMessage[] = [
 					{ role: 'system', content: systemPrompt },
-					{ role: 'user', content: content },
+					{ role: 'user', content: analysisContent },
 					{ role: 'assistant', content: processedResponse },
 					{ role: 'user', content: '请根据函数执行结果继续分析，用自然语言回复。' }
 				];
@@ -172,28 +191,64 @@ export class ConversationFlow {
 			// Remove function call remnants
 			aiResponse = aiResponse.replace(/\[函数执行结果: [^\]]*\]/gi, '').trim();
 
+			// Try to parse areas from AI response before cleaning
+			let parsedAreas: string[] = [];
+			try {
+				// Try JSON format first
+				const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
+				if (jsonMatch) {
+					const json = JSON.parse(jsonMatch[0]);
+					if (json.areas && Array.isArray(json.areas)) {
+						parsedAreas = this.parseAreas(json.areas);
+					}
+				}
+
+				// Try [AREA: xxx] format
+				if (parsedAreas.length === 0) {
+					const areaMatch = aiResponse.match(/\[AREA:\s*([^\]]+)\]/i);
+					if (areaMatch) {
+						const areaStr = areaMatch[1];
+						parsedAreas = areaStr.split(',').map(a => a.trim()).filter(a => a.length > 0);
+						parsedAreas = this.parseAreas(parsedAreas);
+					}
+				}
+
+				// Try #标签 格式 (e.g., "我给你打上 #工作 标签")
+				if (parsedAreas.length === 0) {
+					const tagMatches = aiResponse.match(/#([^\s,，,]+)/g);
+					if (tagMatches) {
+						const tags = tagMatches.map(t => t.substring(1)); // Remove #
+						parsedAreas = this.parseAreas(tags);
+					}
+				}
+			} catch (e) {
+				// Parsing failed, areas will remain empty
+			}
+
 			// Remove markers from display but keep them for parsing
 			const result: AnalysisResult = {
 				blockId,
 				timestamp: new Date().toISOString(),
 				category: '待确认',
+				areas: parsedAreas,
 				entities: { people: [], projects: [], things: [], ideas: [], knowledge: [] },
 				needsConfirmation: [],
 				aiResponse
 			};
 
 			// Store analysis result
-			this.sessionManager.setAnalysisResult(blockId, result);
+			this.sessionManager.setAnalysisResult(blockId, result, parentId);
 
 			// Add AI response as message
 			this.sessionManager.addMessage(blockId, {
 				role: 'assistant',
 				content: aiResponse
-			});
+			}, parentId);
 
 			return {
-				session: this.sessionManager.getSession(blockId)!,
-				initialResponse: result.aiResponse
+				session: this.sessionManager.getSession(blockId, parentId)!,
+				initialResponse: result.aiResponse,
+				areas: parsedAreas
 			};
 		} catch (error) {
 			return {
@@ -206,8 +261,8 @@ export class ConversationFlow {
 	/**
 	 * Continue conversation with user message
 	 */
-	async continueAnalysis(blockId: string, userMessage: string): Promise<ConversationResult> {
-		const session = this.sessionManager.getSession(blockId);
+	async continueAnalysis(blockId: string, userMessage: string, parentId: string | null = null): Promise<ConversationResult> {
+		const session = this.sessionManager.getSession(blockId, parentId);
 
 		if (!session) {
 			return {
@@ -216,11 +271,11 @@ export class ConversationFlow {
 			};
 		}
 
-		// Add user message
+		// Add user message (to parent's session if child block)
 		this.sessionManager.addMessage(blockId, {
 			role: 'user',
 			content: userMessage
-		});
+		}, parentId);
 
 		// Build system prompt with context
 		const systemPrompt = this.buildContinuePrompt(blockId, session);
@@ -258,7 +313,7 @@ export class ConversationFlow {
 				this.sessionManager.addMessage(blockId, {
 					role: 'assistant',
 					content: processedResponse
-				});
+				}, parentId);
 
 				// Continue conversation with function results injected
 				const continueMessages: ChatMessage[] = [
@@ -286,7 +341,7 @@ export class ConversationFlow {
 
 			// Parse all markers
 			const result: ConversationResult = {
-				session: this.sessionManager.getSession(blockId)!,
+				session: this.sessionManager.getSession(blockId, parentId)!,
 				userMessage,
 				aiResponse: filteredResponse
 			};
@@ -500,7 +555,7 @@ export class ConversationFlow {
 			this.sessionManager.addMessage(blockId, {
 				role: 'assistant',
 				content: displayResponse
-			});
+			}, parentId);
 
 			result.aiResponse = displayResponse;
 
@@ -516,9 +571,11 @@ export class ConversationFlow {
 
 	/**
 	 * Get session by blockId
+	 * @param blockId - The block ID
+	 * @param parentId - Parent block ID if this is a child block
 	 */
-	getSession(blockId: string): BlockSession | undefined {
-		return this.sessionManager.getSession(blockId);
+	getSession(blockId: string, parentId: string | null = null): BlockSession | undefined {
+		return this.sessionManager.getSession(blockId, parentId);
 	}
 
 	/**
@@ -533,6 +590,47 @@ export class ConversationFlow {
 	 */
 	getActiveSession(): BlockSession | null {
 		return this.sessionManager.getActiveSession();
+	}
+
+	/**
+	 * Build context for child block analysis
+	 * Includes parent block content, parent's session history, and sibling blocks
+	 */
+	private buildChildBlockContext(
+		childBlockId: string,
+		childContent: string,
+		parentId: string,
+		siblingBlocks: { id: string; content: string }[]
+	): string {
+		// Get parent's session to retrieve conversation history
+		const parentSession = this.sessionManager.getSession(parentId);
+
+		let context = `【父Block内容】\n${parentSession?.content || '未知'}\n\n`;
+
+		// Add parent's conversation history if available
+		if (parentSession?.messages && parentSession.messages.length > 0) {
+			context += `【父Block会话历史】\n`;
+			for (const msg of parentSession.messages) {
+				const role = msg.role === 'user' ? '用户' : '助手';
+				context += `${role}：${msg.content}\n\n`;
+			}
+		}
+
+		// Add other sibling blocks (exclude current child)
+		if (siblingBlocks.length > 0) {
+			context += `【其他子Block】\n`;
+			for (const sibling of siblingBlocks) {
+				if (sibling.id !== childBlockId) {
+					context += `- ${sibling.content}\n`;
+				}
+			}
+			context += `\n`;
+		}
+
+		// Add current child block
+		context += `【当前子Block（待分析）】\n${childContent}`;
+
+		return context;
 	}
 
 	/**
@@ -603,8 +701,13 @@ list_entities: {"entityType": "person"}
 如果需要进行操作，必须使用真实的函数调用格式：
 <function_calls><invoke name="create_entity"><parameter name="name">项目名称</parameter><parameter name="entityType">project</parameter></invoke></function_calls>
 
-请开始分析这篇日记中的人脉实体。按照SOUL.md中规定的顺序进行分析。
-首先用 list_entities 技能列出所有已归档的人脉实体，检查日记中是否提及它们。`;
+请开始分析这篇日记。按照SOUL.md中的"对话策略：全自动连续分析"执行所有5个阶段的分析（人脉→项目/任务→物品→想法→知识）。
+
+**关键要求：**
+1. 连续执行所有阶段，不要停下来询问用户
+2. 如果某个阶段发现已归档实体，立即调用 add_interaction 更新
+3. 如果某个阶段发现新实体，用简短自然的话确认即可，继续下一阶段
+4. 所有阶段完成后，用1-2句话自然回应日记内容，然后在回复中包含 #工作 或 #个人 等标签格式结束`;
 		}
 
 		// Fallback simple prompt
@@ -616,7 +719,7 @@ ${content}
 ## 已知实体
 ${existingEntitiesStr}
 
-请开始分析这篇日记中的人脉实体。`;
+请连续执行所有分析阶段，完成后在回复中包含 #工作 或 #个人 等标签格式。`;
 	}
 
 	/**
@@ -942,6 +1045,106 @@ ${session.messages.map((m: any) => `${m.role}: ${m.content}`).join('\n')}
 						return '{"error": "Entity not found"}';
 					}
 					return '{"error": "Missing entityIdA or entityIdB"}';
+				}
+
+				case 'clip_webpage': {
+					try {
+						const clipResult = await clipWebpage(args.url);
+						if (clipResult.error) {
+							return JSON.stringify({ success: false, error: clipResult.error });
+						}
+						return JSON.stringify({
+							success: true,
+							title: clipResult.title,
+							content: clipResult.content,
+							author: clipResult.author,
+							siteName: clipResult.siteName,
+							url: clipResult.url,
+							clippedAt: clipResult.clippedAt,
+							truncated: clipResult.truncated || false
+						});
+					} catch (error) {
+						return JSON.stringify({ success: false, error: `Clip failed: ${(error as Error).message}` });
+					}
+				}
+
+				case 'summarize_content': {
+					if (!this.provider || !this.provider.isReady()) {
+						return JSON.stringify({ success: false, error: 'AI provider not available' });
+					}
+					try {
+						const summaryResult = await summarizeContent(
+							args.content,
+							this.provider,
+							{ title: args.title, url: args.url, author: args.author }
+						);
+						if (summaryResult.error) {
+							return JSON.stringify({ success: false, error: summaryResult.error });
+						}
+						return JSON.stringify({
+							success: true,
+							summary: summaryResult.summary,
+							originalLength: summaryResult.originalLength,
+							title: summaryResult.title
+						});
+					} catch (error) {
+						return JSON.stringify({ success: false, error: `Summarize failed: ${(error as Error).message}` });
+					}
+				}
+
+				case 'clip_and_summarize': {
+					if (!this.provider || !this.provider.isReady()) {
+						return JSON.stringify({ success: false, error: 'AI provider not available' });
+					}
+					try {
+						// First clip the webpage
+						const clipResult = await clipWebpage(args.url);
+						if (clipResult.error || !clipResult.content) {
+							return JSON.stringify({ success: false, error: clipResult.error || 'Failed to clip content' });
+						}
+
+						// Then summarize
+						const summaryResult = await summarizeContent(
+							clipResult.content,
+							this.provider,
+							{
+								title: clipResult.title,
+								url: clipResult.url,
+								author: clipResult.author,
+								siteName: clipResult.siteName
+							}
+						);
+
+						if (summaryResult.error) {
+							// Return clip result even if summarize fails
+							return JSON.stringify({
+								success: true,
+								clipped: true,
+								summarized: false,
+								title: clipResult.title,
+								content: clipResult.content,
+								url: clipResult.url,
+								clippedAt: clipResult.clippedAt,
+								error: summaryResult.error
+							});
+						}
+
+						return JSON.stringify({
+							success: true,
+							clipped: true,
+							summarized: true,
+							title: clipResult.title,
+							content: clipResult.content,
+							summary: summaryResult.summary,
+							url: clipResult.url,
+							author: clipResult.author,
+							siteName: clipResult.siteName,
+							clippedAt: clipResult.clippedAt,
+							originalLength: summaryResult.originalLength
+						});
+					} catch (error) {
+						return JSON.stringify({ success: false, error: `Clip and summarize failed: ${(error as Error).message}` });
+					}
 				}
 
 				default:
