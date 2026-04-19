@@ -14,7 +14,7 @@ NC='\033[0m' # No Color
 
 # 默认配置
 PLUGIN_NAME="lifewiki"
-DEFAULT_VAULT_PATH="$HOME/lifewiki-vault"
+DEFAULT_VAULT_PATH="$HOME/LifeWiki Vault"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # 解析参数
