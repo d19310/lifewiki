@@ -143,8 +143,8 @@ check_obsidian() {
         eval "$(brew shellenv)"
     fi
 
-    log_info "正在安装/升级 Obsidian..."
-    brew install --cask obsidian
+    log_info "正在升级 Obsidian..."
+    brew upgrade --cask obsidian
 
     # 验证新版本
     local new_version=$(defaults read "/Applications/Obsidian.app/Contents/Info.plist" CFBundleShortVersionString 2>/dev/null || echo "")
