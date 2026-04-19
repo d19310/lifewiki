@@ -20,19 +20,22 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # 解析参数
 VAULT_NAME=""
+VAULT_PATH=""
 SKIP_BUILD=false
 
 usage() {
     echo "用法: $0 [选项]"
     echo ""
     echo "选项:"
-    echo "  -v, --vault-name <名称>    指定 vault 名称 (默认: ${DEFAULT_VAULT_NAME})"
-    echo "  -s, --skip-build           跳过 npm build (使用已编译的 main.js)"
-    echo "  -h, --help                 显示帮助"
+    echo "  -d, --directory <路径>      指定 vault 安装路径 (默认: ~/${DEFAULT_VAULT_NAME})"
+    echo "  -v, --vault-name <名称>     指定 vault 名称 (与 -d 互斥)"
+    echo "  -s, --skip-build            跳过 npm build (使用已编译的 main.js)"
+    echo "  -h, --help                  显示帮助"
     echo ""
     echo "示例:"
-    echo "  $0                                    # 使用默认名称安装"
+    echo "  $0                                    # 使用默认名称安装到 ~/LifeWiki Vault"
     echo "  $0 -v \"我的日记\"                      # 创建名为\"我的日记\"的 vault"
+    echo "  $0 -d \"/Users/me/docs/lifewiki\"       # 安装到指定路径"
     exit 1
 }
 
@@ -51,6 +54,10 @@ log_error() {
 # 解析命令行参数
 while [[ $# -gt 0 ]]; do
     case $1 in
+        -d|--directory)
+            VAULT_PATH="$2"
+            shift 2
+            ;;
         -v|--vault-name)
             VAULT_NAME="$2"
             shift 2
@@ -70,8 +77,19 @@ while [[ $# -gt 0 ]]; do
 done
 
 # 设置默认值
-if [ -z "$VAULT_NAME" ]; then
+if [ -n "$VAULT_PATH" ] && [ -n "$VAULT_NAME" ]; then
+    log_error "不能同时使用 -d 和 -v 参数"
+    usage
+fi
+
+if [ -z "$VAULT_PATH" ] && [ -z "$VAULT_NAME" ]; then
     VAULT_NAME="$DEFAULT_VAULT_NAME"
+fi
+
+# 如果指定了目录路径，展开 ~ 和相对路径
+if [ -n "$VAULT_PATH" ]; then
+    VAULT_PATH="${VAULT_PATH/#\~/$HOME}"
+    VAULT_PATH="$(cd "$(dirname "$VAULT_PATH")" && pwd)/$(basename "$VAULT_PATH")"
 fi
 
 # 检查系统
@@ -225,9 +243,12 @@ check_dependencies() {
 
 # 创建 vault 目录结构
 create_vault() {
-    log_info "创建 Vault: ${VAULT_NAME}"
+    # 如果没有指定路径，从名称构建
+    if [ -z "$VAULT_PATH" ]; then
+        VAULT_PATH="$HOME/${VAULT_NAME}"
+    fi
 
-    VAULT_PATH="$HOME/${VAULT_NAME}"
+    log_info "创建 Vault: ${VAULT_PATH}"
 
     if [ -d "$VAULT_PATH" ]; then
         log_warn "Vault 已存在: ${VAULT_PATH}"
@@ -335,8 +356,6 @@ enable_plugin() {
 
 # 打开 Obsidian
 open_obsidian() {
-    VAULT_PATH="$HOME/${VAULT_NAME}"
-
     log_info "准备启动 Obsidian..."
 
     # 检查 vault 是否已在 Obsidian 中注册
