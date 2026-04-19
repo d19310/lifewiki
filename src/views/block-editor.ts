@@ -75,6 +75,7 @@ export class BlockEditorView extends ItemView {
 	private inputHintEl: HTMLElement | null = null;
 	private inputAppendFooterEl: HTMLElement | null = null;
 	private appendModeActionsEl: HTMLElement | null = null;
+	private appendSubmitBtn: HTMLElement | null = null;
 	// Append mode state
 	private isAppendMode: boolean = false;
 	private appendModeBlockId: string | null = null;
@@ -676,7 +677,7 @@ export class BlockEditorView extends ItemView {
 				display: flex;
 			}
 
-			/* Append Submit Button */
+			/* Append Submit Button - pill shape */
 			.lifewiki-append-submit-btn {
 				font-size: 12px !important;
 				font-weight: 600 !important;
@@ -684,8 +685,8 @@ export class BlockEditorView extends ItemView {
 				background: #5c28b8 !important;
 				color: #ffffff !important;
 				border: none !important;
-				border-radius: 6px !important;
-				padding: 6px 14px !important;
+				border-radius: 999px !important;
+				padding: 6px 16px !important;
 				cursor: pointer;
 				transition: background-color 0.2s;
 			}
@@ -944,11 +945,11 @@ export class BlockEditorView extends ItemView {
 		});
 
 		// Submit button
-		const submitBtn = this.appendModeActionsEl.createEl('button', {
+		this.appendSubmitBtn = this.appendModeActionsEl.createEl('button', {
 			cls: 'lifewiki-append-submit-btn',
-			text: '追加日记'
+			text: '将在 HH:mm 这条日记下追加'
 		});
-		submitBtn.addEventListener('click', () => {
+		this.appendSubmitBtn.addEventListener('click', () => {
 			this.submitAppend();
 		});
 
@@ -1566,7 +1567,7 @@ export class BlockEditorView extends ItemView {
 	 * Update input area for append mode
 	 */
 	private updateInputAreaForAppendMode() {
-		if (!this.inputTextarea || !this.inputHintEl || !this.appendModeActionsEl) {
+		if (!this.inputTextarea || !this.inputHintEl || !this.appendModeActionsEl || !this.appendSubmitBtn) {
 			return;
 		}
 
@@ -1578,6 +1579,7 @@ export class BlockEditorView extends ItemView {
 			this.inputTextarea.placeholder = '追加记录...';
 			this.inputHintEl.textContent = `将在 ${block.timestamp} 该条日记下追加记录`;
 			this.inputHintEl.setAttribute('style', 'display: none;');
+			this.appendSubmitBtn.textContent = `将在 ${block.timestamp} 这条日记下追加`;
 			this.appendModeActionsEl.classList.add('visible');
 			this.inputTextarea.value = '';
 			this.inputValue = '';
