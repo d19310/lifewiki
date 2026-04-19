@@ -92,6 +92,56 @@ check_system() {
     log_info "系统检查通过"
 }
 
+# 检查并安装/升级 Obsidian
+check_obsidian() {
+    log_info "检查 Obsidian 版本..."
+
+    local MIN_VERSION="1.5.0"
+
+    # 从 Info.plist 获取 Obsidian 版本
+    local obsidian_version=$(defaults read "/Applications/Obsidian.app/Contents/Info.plist" CFBundleShortVersionString 2>/dev/null || echo "")
+
+    if [ -z "$obsidian_version" ]; then
+        log_warn "无法获取 Obsidian 版本，假设版本符合要求"
+        return 0
+    fi
+
+    log_info "Obsidian 版本: ${obsidian_version}"
+
+    # 比较版本: obsidian_version >= MIN_VERSION 返回 0
+    if [ "$(printf '%s\n%s\n' "$MIN_VERSION" "$obsidian_version" | sort -V | head -n1)" = "$MIN_VERSION" ]; then
+        if [ "$obsidian_version" = "$MIN_VERSION" ]; then
+            log_info "Obsidian 版本符合要求 (${obsidian_version})"
+        else
+            log_info "Obsidian 版本符合要求 (>= ${MIN_VERSION})"
+        fi
+        return 0
+    fi
+
+    # 版本不符合要求
+    echo ""
+    echo "========================================"
+    log_warn "Obsidian 版本过低: ${obsidian_version}"
+    echo "========================================"
+    echo ""
+    echo "LifeWiki 需要 Obsidian ${MIN_VERSION} 或更高版本。"
+    echo ""
+    echo "你当前版本: ${obsidian_version}"
+    echo ""
+
+    read -p "是否现在打开 Obsidian 下载页面? (y/n) " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        log_info "你可以手动升级 Obsidian: https://obsidian.md"
+        exit 0
+    fi
+
+    # 打开下载页面
+    open "https://obsidian.md"
+    log_info "请下载并安装最新版本后重新运行此脚本"
+    exit 0
+}
+
 # 检查并安装依赖
 check_dependencies() {
     log_info "检查依赖环境..."
@@ -315,6 +365,7 @@ main() {
     echo ""
 
     check_system
+    check_obsidian
     check_dependencies
     VAULT_PATH=$(create_vault)
     install_plugin
