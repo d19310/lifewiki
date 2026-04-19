@@ -638,7 +638,7 @@ ${body}`;
 		}
 
 		lines.push('## 核心内容');
-		lines.push('...');
+		lines.push(m.content || '...');
 		lines.push('');
 
 		if (entity.relatedEntities.length > 0) {

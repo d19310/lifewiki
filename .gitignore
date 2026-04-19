@@ -3,9 +3,14 @@ node_modules/
 
 # Build output
 dist/
+main.js
+main.css
 
 # Test vault
 test-lifewiki-vault/.obsidian/plugins/lifewiki/
+
+# Coverage
+coverage/
 
 # OS files
 .DS_Store

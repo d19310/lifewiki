@@ -60,13 +60,24 @@ export class LangGraphAgent {
 	/**
 	 * Build system prompt from agent config
 	 */
-	private buildSystemPrompt(blockId: string, content: string, existingEntities: { name: string; type: string }[] = []): string {
+	private buildSystemPrompt(
+		blockId: string,
+		content: string,
+		existingEntities: { name: string; type: string }[] = [],
+		parentId: string | null = null,
+		siblingBlocks: { id: string; content: string }[] = []
+	): string {
 		const date = new Date().toISOString().split('T')[0];
 
 		// Format existing entities for the prompt
 		const existingEntitiesStr = existingEntities.length > 0
 			? existingEntities.map(e => `- ${e.name} (${e.type})`).join('\n')
 			: '无';
+
+		// Build child block context if applicable
+		const childBlockContext = parentId
+			? `\n## 子块上下文\n这是父block的子block。父block ID: ${parentId}\n其他子block内容：\n${siblingBlocks.map(b => `- ${b.content}`).join('\n')}\n`
+			: '';
 
 		// Use agent config or fallback to simple prompt
 		if (this.agentConfig) {
@@ -83,7 +94,7 @@ ${this.agentConfig.wiki}
 ## 当前会话上下文
 
 日期: ${date}
-
+${childBlockContext}
 ## 已知实体（在vault中已归档）
 先用 list_entities 技能检查以下实体是否在日记中被提及：
 ${existingEntitiesStr}
@@ -115,13 +126,17 @@ list_entities: {"entityType": "person"}
 
 ## 关键提醒
 
-**不要在回复文本中伪造函数执行结果！** 不要写 "[函数执行结果: ...JSON...]" 这种文本，除非是真正调用了函数后的结果会被系统自动插入。
+**不要输出分析过程！** 只输出最终的自然对话回复，像朋友聊天一样。
 
-如果需要进行操作，必须使用真实的函数调用格式：
-<function_calls><invoke name="create_entity"><parameter name="name">实体名称</parameter><parameter name="entityType">person|project|thing|idea|knowledge</parameter><parameter name="summary">摘要描述</parameter></invoke></function_calls>
+**回复格式：**
+直接用1-2句话自然地回应日记内容，在回复末尾加上 #工作 或 #个人 等标签。不要提及任何分析阶段、函数调用结果。
 
-请开始分析这篇日记中的人脉实体。
-首先用 list_entities 技能列出所有已归档的人脉实体，检查日记中是否提及它们。`;
+**示例：**
+
+日记："今天和张三开会讨论项目"
+✅ 正确：好的，项目进展已记录。#工作
+
+❌ 错误：阶段1人脉：已调用xxx... 阶段2项目：...`;
 		}
 
 		// Fallback simple prompt
@@ -133,13 +148,18 @@ ${content}
 ## 已知实体
 ${existingEntitiesStr}
 
-请开始分析这篇日记中的人脉实体。`;
+请连续执行所有分析阶段，完成后在回复末尾包含 #工作 或 #个人 等标签格式。`;
 	}
 
 	/**
 	 * Create a new machine for a block
 	 */
-	private async createMachine(blockId: string, content: string): Promise<BlockAnalysisMachine> {
+	private async createMachine(
+		blockId: string,
+		content: string,
+		parentId: string | null = null,
+		siblingBlocks: { id: string; content: string }[] = []
+	): Promise<BlockAnalysisMachine> {
 		// Get existing entities for context
 		let existingEntities: { name: string; type: string }[] = [];
 		try {
@@ -161,7 +181,7 @@ ${existingEntitiesStr}
 			console.log('[LangGraphAgent] Failed to get existing entities:', e);
 		}
 
-		const systemPrompt = this.buildSystemPrompt(blockId, content, existingEntities);
+		const systemPrompt = this.buildSystemPrompt(blockId, content, existingEntities, parentId, siblingBlocks);
 		const llm = new AIProviderAdapter(this.provider);
 		const tools = new EntityTools(this.entityManager, blockId);
 		return new BlockAnalysisMachine(
@@ -175,14 +195,20 @@ ${existingEntitiesStr}
 	/**
 	 * Start analysis for a new block
 	 */
-	async startBlockAnalysis(blockId: string, content: string): Promise<{
+	async startBlockAnalysis(
+		blockId: string,
+		content: string,
+		parentId: string | null = null,
+		siblingBlocks: { id: string; content: string }[] = []
+	): Promise<{
 		session: BlockSession;
 		initialResponse?: string;
+		areas?: string[];
 		error?: string;
 	}> {
 		try {
 			// Create machine for this block
-			const machine = await this.createMachine(blockId, content);
+			const machine = await this.createMachine(blockId, content, parentId, siblingBlocks);
 			this.machines.set(blockId, { machine, blockId, content });
 
 			// Run the machine until we get a response
@@ -191,9 +217,13 @@ ${existingEntitiesStr}
 			// Build session from state
 			const session = this.buildSession(blockId, state);
 
+			// Parse areas from AI response
+			const areas = this.parseAreasFromResponse(state.aiResponse || '');
+
 			return {
 				session,
-				initialResponse: state.aiResponse || undefined
+				initialResponse: state.aiResponse || undefined,
+				areas
 			};
 		} catch (error) {
 			return {
@@ -209,6 +239,30 @@ ${existingEntitiesStr}
 				error: `Analysis failed: ${(error as Error).message}`
 			};
 		}
+	}
+
+	/**
+	 * Parse areas from AI response
+	 * Supports #tag format (e.g., "#工作 #个人")
+	 */
+	private parseAreasFromResponse(response: string): string[] {
+		const tagMatches = response.match(/#([^\s,，,]+)/g);
+		if (tagMatches) {
+			const tags = tagMatches.map(t => t.substring(1));
+			return this.parseAreas(tags);
+		}
+		return [];
+	}
+
+	/**
+	 * Parse and validate areas
+	 */
+	private parseAreas(areas: unknown): string[] {
+		const validAreas = ['工作', '个人', '学习', '其他'];
+		if (!Array.isArray(areas)) return [];
+		return areas
+			.filter((a): a is string => typeof a === 'string' && validAreas.includes(a))
+			.slice(0, 2);
 	}
 
 	/**

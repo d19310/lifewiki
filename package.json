@@ -21,6 +21,8 @@
   "license": "MIT",
   "dependencies": {
     "@langchain/core": "^0.3.0",
+    "jsdom": "^29.0.2",
+    "turndown": "^7.2.4",
     "zod": "^3.23.0"
   },
   "devDependencies": {

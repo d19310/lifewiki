@@ -29,7 +29,6 @@ const context = await esbuild.context({
 		"@lezer/common",
 		"@lezer/highlight",
 		"@lezer/lr",
-		"turndown",
 		...builtinModules
 	],
 	format: "cjs",

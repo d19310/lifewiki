@@ -124,7 +124,7 @@ export class AIAnalysisPanelView extends ItemView {
 			this.updateSendBtnState();
 		});
 
-		// Send button with icon
+		// Send button with icon (bottom-right of input row)
 		this.sendBtnEl = inputRow.createEl('button', {
 			cls: 'lifewiki-send-btn',
 			attr: { title: '发送' }
@@ -260,15 +260,16 @@ export class AIAnalysisPanelView extends ItemView {
 		}
 	}
 
-	setActiveBlock(blockId: string, blockContent: string) {
+	setActiveBlock(blockId: string, blockContent: string, parentId?: string | null) {
 		this.activeBlockId = blockId;
 		const sessionManager = this.plugin.getSessionManager();
-		const session = sessionManager.getOrCreateSession(blockId);
+		// Use parent's session if this is a child block
+		const session = sessionManager.getOrCreateSession(blockId, parentId || null);
 		this.showChatState();
 		this.renderSession(session);
 	}
 
-	startNewSession(blockId: string, blockContent: string, initialResponse: string) {
+	startNewSession(blockId: string, blockContent: string, initialResponse: string, parentId: string | null = null) {
 		this.activeBlockId = blockId;
 		this.showChatState();
 
@@ -277,13 +278,13 @@ export class AIAnalysisPanelView extends ItemView {
 		}
 
 		const sessionManager = this.plugin.getSessionManager();
-		const session = sessionManager.getOrCreateSession(blockId);
+		const session = sessionManager.getOrCreateSession(blockId, parentId);
 
 		const aiContent = initialResponse || '';
 		sessionManager.addMessage(blockId, {
 			role: 'assistant',
 			content: aiContent
-		});
+		}, parentId);
 
 		if (aiContent) {
 			this.addChatMessage('assistant', aiContent);
@@ -368,12 +369,11 @@ export class AIAnalysisPanelView extends ItemView {
 
 		try {
 			let result: any;
-			if (this.plugin.settings.useLangGraph && this.plugin.getLangGraphAgent()) {
-				const agent = this.plugin.getLangGraphAgent()!;
+			const agent = this.plugin.getLangGraphAgent();
+			if (agent) {
 				result = await agent.continueAnalysis(this.activeBlockId, content);
 			} else {
-				const flow = this.plugin.getConversationFlow();
-				result = await flow.continueAnalysis(this.activeBlockId, content);
+				throw new Error('AI agent not available');
 			}
 
 			this.hideThinkingIndicator();

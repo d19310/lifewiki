@@ -121,14 +121,17 @@
    - `author`: 作者（如果有）
    - `summary`: AI 总结
    - `siteName`: 来源网站
+   - `content`: 网页的完整 Markdown 内容（用于存储剪藏的正文）
 
 **示例流程：**
 ```
 用户说："读了这篇文章 https://example.com/ai-article，觉得很有收获"
-→ AI 调用 clip_and_summarize 获取内容并总结
-→ AI 创建 knowledge 实体记录这篇文章
+→ AI 发现 URL，立刻调用工具：clip_and_summarize({"url": "https://example.com/ai-article"})
+→ 获得返回结果后，创建 knowledge 实体，metadata 中包含 url、title、summary、content
 → 回复："不错，这篇文章的核心观点已归档。"
 ```
+
+**重要：只要日记中出现 URL，必须立即调用 clip_and_summarize 工具，不能只创建空实体。**
 
 **支持的网站类型：**
 - 普通网站：自动使用 Readability 风格提取正文

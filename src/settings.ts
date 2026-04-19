@@ -13,9 +13,9 @@ export interface LifeWikiSettings {
 	baseUrl: string;
 	model: string;
 	systemPrompt: string;
+	areas: string[];           // Available areas/tags
 	skillsEnabled: boolean;
 	autoConfirm: boolean;
-	useLangGraph: boolean;
 }
 
 export const DEFAULT_SETTINGS: LifeWikiSettings = {
@@ -25,12 +25,12 @@ export const DEFAULT_SETTINGS: LifeWikiSettings = {
 	model: 'qwen3.5-plus',
 	systemPrompt: `你是一个日记分析助手。用户每天记录流水账式日记，你需要：
 1. 分析每条日记，识别人脉、项目、物品、想法、知识
-2. 判断是工作还是个人内容，标注 #工作 或 #个人
+2. 判断日记属于哪个或哪几个领域（可多选，最多2个）：工作、个人、学习等
 3. 使用工具创建/更新实体
 4. 用友好方式与用户互动，补充实体信息`,
+	areas: ['工作', '个人', '学习', '其他'],
 	skillsEnabled: true,
-	autoConfirm: false,
-	useLangGraph: false
+	autoConfirm: false
 };
 
 export class LifeWikiSettingTab extends SettingTab {
@@ -204,18 +204,6 @@ export class LifeWikiSettingTab extends SettingTab {
 				toggle.setValue(this.plugin.settings.autoConfirm)
 					.onChange(async (value) => {
 						this.plugin.settings.autoConfirm = value;
-						await this.plugin.saveSettings();
-					});
-			});
-
-		// Use LangGraph
-		new Setting(containerEl)
-			.setName('使用 LangGraph')
-			.setDesc('启用 LangGraph TypeScript SDK（实验性功能）')
-			.addToggle(toggle => {
-				toggle.setValue(this.plugin.settings.useLangGraph)
-					.onChange(async (value) => {
-						this.plugin.settings.useLangGraph = value;
 						await this.plugin.saveSettings();
 					});
 			});

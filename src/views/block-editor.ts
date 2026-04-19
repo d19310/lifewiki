@@ -9,7 +9,7 @@
  * - Each block: H3 timestamp + content, sub-blocks as bullet points
  */
 
-import { ItemView, WorkspaceLeaf, TFile, TFolder } from 'obsidian';
+import { ItemView, WorkspaceLeaf, TFile, TFolder, setIcon } from 'obsidian';
 import type LifeWikiPlugin from '../main';
 import { Block } from '../entities/types';
 
@@ -41,13 +41,21 @@ function stableId(str: string): string {
 	return `${hex.substring(0, 8)}-${hex.substring(0, 4)}-4${hex.substring(0, 3)}-${hex.substring(0, 4)}-${hex.substring(0, 12)}`;
 }
 
+interface ChildBlock {
+	id: string;
+	timestamp: string;      // HH:mm
+	content: string;        // 子Block正文
+	parentId: string;       // 父Block ID
+}
+
 interface ParsedBlock {
 	id: string;
 	timestamp: string;      // HH:mm
 	source: string;         // [Lifewiki]
 	category: string;       // #工作 或 #个人
 	content: string;         // 父Block正文
-	children: string[];     // 子Block内容数组
+	children: ChildBlock[]; // 子Block数组
+	parentId: string | null; // null for top-level blocks
 }
 
 export class BlockEditorView extends ItemView {
@@ -60,6 +68,20 @@ export class BlockEditorView extends ItemView {
 	private contentContainer: HTMLElement | null = null;
 	private childInputEl: HTMLElement | null = null;
 	private selectedBlockContent: string | null = null;
+	// Input area elements
+	private inputAreaEl: HTMLElement | null = null;
+	private inputTextarea: HTMLTextAreaElement | null = null;
+	private inputHintEl: HTMLElement | null = null;
+	private inputAppendFooterEl: HTMLElement | null = null;
+	private appendModeActionsEl: HTMLElement | null = null;
+	// Append mode state
+	private isAppendMode: boolean = false;
+	private appendModeBlockId: string | null = null;
+	// Edit mode state
+	private isEditMode: boolean = false;
+	private editModeBlockId: string | null = null;
+	// Flow line element reference
+	private flowLineEl: HTMLElement | null = null;
 
 	constructor(leaf: WorkspaceLeaf, plugin: LifeWikiPlugin) {
 		super(leaf);
@@ -122,6 +144,19 @@ export class BlockEditorView extends ItemView {
 
 		// Input area at bottom
 		this.createInputArea(mainContainer);
+
+		// Global click handler to handle append/edit mode when clicking outside
+		this.contentContainer?.addEventListener('click', (e) => {
+			const target = e.target as HTMLElement;
+			// Check if click is outside a block (both .lifewiki-block and .lifewiki-block-group)
+			if (this.isAppendMode && !target.closest('.lifewiki-block, .lifewiki-block-group') && !target.closest('.lifewiki-input-area')) {
+				this.cancelAppendMode();
+			}
+			// Exit edit mode when clicking outside the editing block (parent or child)
+			if (this.isEditMode && !target.closest('.lifewiki-block.editing, .lifewiki-block-group.editing, .lifewiki-block-child.editing')) {
+				this.exitEditMode();
+			}
+		});
 	}
 
 	private addStyles() {
@@ -216,6 +251,18 @@ export class BlockEditorView extends ItemView {
 				overflow-y: auto;
 				padding: 0 48px 200px;
 				background: var(--surface);
+				position: relative;
+			}
+
+			/* Flow Line - continuous vertical line through the diary */
+			.flow-line {
+				position: absolute;
+				left: 70px;
+				top: 0;
+				width: 1px;
+				background: rgba(158, 158, 158, 0.3);
+				z-index: 0;
+				height: 0; /* Will be set dynamically by extendFlowLine() */
 			}
 
 			/* Block Group - Parent with children */
@@ -223,25 +270,15 @@ export class BlockEditorView extends ItemView {
 				position: relative;
 				display: flex;
 				flex-direction: column;
-				margin-bottom: 20px;
+				margin-bottom: 16px;
+				z-index: 1;
 			}
 
 			.lifewiki-block-group:last-child {
 				margin-bottom: 0;
 			}
 
-			/* Block Group Tree Line - vertical line spanning all children */
-			.lifewiki-block-group::before {
-				content: '';
-				position: absolute;
-				left: 38px;
-				top: 0;
-				bottom: 0;
-				width: 1px;
-				background-color: var(--outline-variant);
-				z-index: 0;
-				opacity: 0.4;
-			}
+			/* Remove old tree line - we use Flow Line now */
 
 			/* Single Block */
 			.lifewiki-block {
@@ -249,7 +286,7 @@ export class BlockEditorView extends ItemView {
 				z-index: 1;
 				cursor: pointer;
 				transition: transform 0.2s ease;
-				margin-bottom: 20px;
+				margin-bottom: 16px;
 			}
 
 			.lifewiki-block:last-child {
@@ -264,7 +301,7 @@ export class BlockEditorView extends ItemView {
 			.lifewiki-block-card {
 				background: var(--surface-container-lowest);
 				border-radius: 8px;
-				padding: 20px;
+				padding: 12px 16px;
 				box-shadow: 0 10px 40px -10px rgba(26, 28, 28, 0.06);
 				border: 1px solid rgba(204, 195, 214, 0.15);
 				transition: box-shadow 0.2s ease;
@@ -278,14 +315,48 @@ export class BlockEditorView extends ItemView {
 				box-shadow: 0 14px 50px -10px rgba(26, 28, 28, 0.08);
 			}
 
-			.lifewiki-block.selected .lifewiki-block-card {
+			.lifewiki-block.selected .lifewiki-block-card,
+			.lifewiki-block-group.selected .lifewiki-block-card {
 				background: var(--surface-container-high);
+				border: 2px solid var(--primary);
+			}
+
+			/* Edit mode */
+			.lifewiki-block.editing .lifewiki-block-card {
+				background: var(--on-primary-container);
+				border: 2px solid var(--primary);
+			}
+
+			/* Edit mode textarea and input */
+			.lifewiki-edit-textarea {
+				width: 100%;
+				min-height: 60px;
+				padding: 8px 12px;
+				font-size: 14px;
+				line-height: 1.6;
+				border: 1px solid rgba(204, 195, 214, 0.3);
+				border-radius: 8px;
+				background: var(--surface-container-lowest);
+				color: var(--on-surface);
+				font-family: var(--font-body);
+				resize: vertical;
+				box-sizing: border-box;
+			}
+
+			.lifewiki-edit-input {
+				padding: 4px 8px;
+				font-size: 12px;
+				border: 1px solid rgba(204, 195, 214, 0.3);
+				border-radius: 20px;
+				background: var(--surface-container-lowest);
+				color: var(--on-surface);
+				font-family: var(--font-body);
 			}
 
 			/* Timestamp Label - inline with content */
 			.lifewiki-block-timestamp {
 				font-size: 12px;
-				font-weight: 500;
+				font-weight: 600;
 				color: var(--on-surface-variant);
 				font-family: var(--font-body);
 				flex-shrink: 0;
@@ -299,7 +370,29 @@ export class BlockEditorView extends ItemView {
 				content: ']';
 			}
 
-			/* Block Content Text - inline with timestamp */
+			/* Main wrapper - inline-flex to keep timestamp and content on same line */
+			.lifewiki-main-wrapper {
+				display: inline-flex;
+				align-items: baseline;
+				gap: 6px;
+			}
+
+			/* Block Content Text - takes remaining space */
+			.lifewiki-block-content {
+				font-size: 14px;
+				color: var(--on-surface);
+				line-height: 1.6;
+				font-family: var(--font-body);
+				flex: 1;
+				white-space: pre-wrap;
+				word-break: break-word;
+				min-width: 0;
+			}
+
+			.lifewiki-block-content.expanded {
+				text-indent: 0;
+				padding-left: 0;
+			}
 			.lifewiki-block-content {
 				font-size: 14px;
 				color: var(--on-surface);
@@ -324,7 +417,7 @@ export class BlockEditorView extends ItemView {
 			.lifewiki-block-body {
 				display: flex;
 				flex-direction: column;
-				gap: 8px;
+				gap: 4px;
 			}
 
 			/* Tag Badge - smaller font, primary color */
@@ -387,25 +480,14 @@ export class BlockEditorView extends ItemView {
 
 			/* Children Container */
 			.lifewiki-block-children {
-				margin-left: 52px;
-				padding-left: 20px;
-				padding-top: 16px;
+				margin-left: 70px;
+				padding-left: 0;
+				padding-top: 12px;
 				border-left: none;
 				position: relative;
 				display: flex;
 				flex-direction: column;
-				gap: 16px;
-			}
-
-			/* Horizontal line connecting vertical line to first child */
-			.lifewiki-block-children::before {
-				content: '';
-				position: absolute;
-				left: -20px;
-				top: 16px;
-				width: 20px;
-				height: 1px;
-				background: rgba(204, 195, 214, 0.5);
+				gap: 12px;
 			}
 
 			/* Child Block */
@@ -413,11 +495,22 @@ export class BlockEditorView extends ItemView {
 				position: relative;
 			}
 
+			/* Horizontal connector from child left edge, extending left */
+			.lifewiki-block-child::before {
+				content: '';
+				position: absolute;
+				left: -48px;
+				top: 50%;
+				width: 48px;
+				height: 2px;
+				background: rgba(158, 158, 158, 0.3);
+			}
+
 			/* Child Card - matches parent card style */
 			.lifewiki-block-child-card {
 				background: var(--surface-container-lowest);
 				border-radius: 8px;
-				padding: 20px;
+				padding: 10px 14px;
 				border: 1px solid rgba(204, 195, 214, 0.15);
 				box-shadow: 0 10px 40px -10px rgba(26, 28, 28, 0.06);
 				display: flex;
@@ -425,17 +518,39 @@ export class BlockEditorView extends ItemView {
 				gap: 12px;
 			}
 
+			/* Selected child block */
+			.lifewiki-block-child.selected .lifewiki-block-child-card {
+				background: var(--surface-container-high);
+				border: 2px solid var(--primary);
+			}
+
+			/* Child edit mode */
+			.lifewiki-block-child .lifewiki-edit-textarea {
+				width: 100%;
+				min-height: 40px;
+				padding: 8px;
+				font-size: 14px;
+				line-height: 1.5;
+				border: 1px solid rgba(204, 195, 214, 0.3);
+				border-radius: 6px;
+				background: var(--surface-container-lowest);
+				color: var(--on-surface);
+				font-family: var(--font-body);
+				resize: vertical;
+				box-sizing: border-box;
+			}
+
 			/* Child Header */
 			.lifewiki-block-child-header {
 				display: flex;
 				align-items: center;
 				gap: 12px;
-				margin-bottom: 8px;
+				margin-bottom: 4px;
 			}
 
 			.lifewiki-block-child-timestamp {
 				font-size: 12px;
-				font-weight: 500;
+				font-weight: 600;
 				color: var(--on-surface-variant);
 				font-family: var(--font-body);
 				min-width: 48px;
@@ -464,9 +579,9 @@ export class BlockEditorView extends ItemView {
 
 			/* Child Tags */
 			.lifewiki-block-child-tags {
-				margin-top: 8px;
+				margin-top: 4px;
 				display: flex;
-				gap: 8px;
+				gap: 6px;
 				flex-wrap: wrap;
 			}
 
@@ -489,31 +604,142 @@ export class BlockEditorView extends ItemView {
 				z-index: 10;
 			}
 
-			/* Input Card */
-			.lifewiki-input-box {
+			/* Input Inner Container */
+			.lifewiki-input-inner {
 				width: 100%;
-				min-height: 80px;
-				max-height: 200px;
+				height: 140px;
+				max-height: 140px;
 				padding: 16px 20px;
-				font-size: 14px;
-				line-height: 1.6;
+				padding-bottom: 40px;
 				border: 1px solid rgba(204, 195, 214, 0.15);
 				border-radius: 16px;
-				background: var(--surface-container-high) !important;
-				color: var(--on-surface);
-				resize: vertical;
-				font-family: var(--font-body);
+				background: var(--surface-container-high);
+				box-shadow: 0 10px 50px -5px rgba(26, 28, 28, 0.15), 0 4px 10px -3px rgba(0, 0, 0, 0.08);
+				display: flex;
+				flex-direction: column;
 				box-sizing: border-box;
-				box-shadow: 0 10px 40px -10px rgba(26, 28, 28, 0.06);
-				transition: none;
+				position: relative;
+			}
+
+			/* Input Card */
+			.lifewiki-input-box {
+				flex: 1;
+				width: 100%;
+				font-size: 14px;
+				line-height: 1.6;
+				border: none;
+				border-radius: 0;
+				background: transparent !important;
+				color: var(--on-surface);
+				resize: none;
+				font-family: var(--font-body);
+				padding: 0;
+				outline: none;
+				box-shadow: none;
 			}
 
 			.lifewiki-input-box:focus {
 				outline: none;
-				border-color: rgba(204, 195, 214, 0.15);
-				box-shadow: 0 10px 40px -10px rgba(26, 28, 28, 0.06);
-				background: var(--surface-container-high) !important;
+				box-shadow: none;
 			}
+
+			/* Input Bottom Row */
+			.lifewiki-input-bottom {
+				display: flex;
+				justify-content: space-between;
+				align-items: center;
+				position: absolute;
+				bottom: 12px;
+				left: 20px;
+				right: 20px;
+			}
+
+			/* Input Hint (normal mode) */
+			.lifewiki-input-hint {
+				font-size: 11px;
+				color: var(--on-surface-variant);
+				opacity: 0.7;
+				font-family: var(--font-body);
+				white-space: nowrap;
+				flex-shrink: 0;
+			}
+
+			/* Append Mode Actions (button + cancel) */
+			.lifewiki-append-mode-actions {
+				display: none;
+				align-items: center;
+				gap: 8px;
+			}
+
+			.lifewiki-append-mode-actions.visible {
+				display: flex;
+			}
+
+			/* Append Submit Button */
+			.lifewiki-append-submit-btn {
+				font-size: 12px !important;
+				font-weight: 600 !important;
+				font-family: var(--font-body) !important;
+				background: #5c28b8 !important;
+				color: #ffffff !important;
+				border: none !important;
+				border-radius: 6px !important;
+				padding: 6px 14px !important;
+				cursor: pointer;
+				transition: background-color 0.2s;
+			}
+
+			.lifewiki-append-submit-btn:hover {
+				background: #3d1a7a !important;
+			}
+
+			/* Append Cancel Button */
+			.lifewiki-append-cancel-btn {
+				width: 20px;
+				height: 20px;
+				border-radius: 50%;
+				background: var(--surface-variant);
+				color: var(--on-surface-variant);
+				border: none;
+				display: flex;
+				align-items: center;
+				justify-content: center;
+				cursor: pointer;
+				font-size: 14px;
+				line-height: 1;
+				transition: background-color 0.2s;
+			}
+
+			.lifewiki-append-cancel-btn:hover {
+				background: var(--outline);
+				color: var(--on-primary);
+			}
+
+			/* Send Button (Circular Arrow) */
+			.lifewiki-diary-send-btn {
+				width: 36px;
+				height: 36px;
+				border-radius: 50%;
+				background: var(--on-surface-variant);
+				color: #ffffff;
+				border: none;
+				display: flex;
+				align-items: center;
+				justify-content: center;
+				cursor: pointer;
+				transition: background-color 0.2s, transform 0.2s;
+			}
+
+			.lifewiki-diary-send-btn:hover {
+				transform: translateY(-1px);
+			}
+
+			/* Button highlighted when input is focused (darker primary) */
+			.lifewiki-input-inner:focus-within .lifewiki-diary-send-btn {
+				background: #5c28b8 !important;
+				color: #ffffff !important;
+			}
+
 
 			.lifewiki-input-box:hover {
 				background: var(--surface-container-high) !important;
@@ -524,14 +750,84 @@ export class BlockEditorView extends ItemView {
 				opacity: 0.6;
 			}
 
+
 			/* Input Hint */
 			.lifewiki-input-hint {
 				font-size: 11px;
 				color: var(--on-surface-variant);
-				margin-top: 10px;
-				text-align: right;
 				opacity: 0.7;
 				font-family: var(--font-body);
+			}
+
+			/* Input Box Append Mode */
+			.lifewiki-input-box.append-mode {
+				outline: none;
+				border: none;
+				box-shadow: none;
+			}
+
+			/* Append Mode Footer */
+			.lifewiki-append-footer {
+				display: flex;
+				justify-content: space-between;
+				align-items: center;
+				margin-top: 10px;
+			}
+
+			.lifewiki-append-hint {
+				font-size: 12px;
+				color: var(--primary);
+				font-weight: 500;
+				font-family: var(--font-body);
+				background: var(--primary-container);
+				padding: 4px 10px;
+				border-radius: 6px;
+			}
+
+			.lifewiki-append-actions {
+				display: flex;
+				align-items: center;
+				gap: 8px;
+			}
+
+			/* Append Button */
+			.lifewiki-append-btn {
+				padding: 6px 14px;
+				border-radius: 8px;
+				border: none;
+				background: linear-gradient(135deg, var(--primary) 0%, var(--primary-container) 100%);
+				color: var(--on-primary);
+				font-size: 12px;
+				font-weight: 500;
+				font-family: var(--font-body);
+				cursor: pointer;
+				transition: all 0.15s;
+			}
+
+			.lifewiki-append-btn:hover {
+				transform: translateY(-1px);
+				box-shadow: 0 4px 12px -2px rgba(92, 40, 184, 0.25);
+			}
+
+			/* Cancel Button */
+			.lifewiki-cancel-btn {
+				display: flex;
+				align-items: center;
+				justify-content: center;
+				width: 24px;
+				height: 24px;
+				border-radius: 50%;
+				border: none;
+				background: var(--surface-container-high);
+				color: var(--on-surface-variant);
+				font-size: 14px;
+				cursor: pointer;
+				transition: all 0.15s;
+			}
+
+			.lifewiki-cancel-btn:hover {
+				background: var(--surface-variant);
+				color: var(--on-surface);
 			}
 
 			/* Empty State */
@@ -628,40 +924,99 @@ export class BlockEditorView extends ItemView {
 	}
 
 	private createInputArea(container: HTMLElement) {
-		const inputArea = container.createEl('div', {
+		this.inputAreaEl = container.createEl('div', {
 			cls: 'lifewiki-input-area'
 		});
 
-		const textarea = inputArea.createEl('textarea', {
-			cls: 'lifewiki-input-box',
-			attr: {
-				placeholder: '记录今天的生活...',
-				rows: '3'
-			}
+		// Input inner container (matches reference design structure)
+		const inputInnerEl = this.inputAreaEl.createEl('div', {
+			cls: 'lifewiki-input-inner'
 		});
 
-		// Character count
-		const hint = inputArea.createEl('div', {
+		this.inputTextarea = inputInnerEl.createEl('textarea', {
+			cls: 'lifewiki-input-box',
+			attr: {
+				placeholder: '记录今天的生活...'
+			}
+		}) as HTMLTextAreaElement;
+
+		// Bottom-right: arrow button (like reference design)
+		const inputBottomEl = inputInnerEl.createEl('div', {
+			cls: 'lifewiki-input-bottom'
+		});
+
+		// Hint text on bottom-left (normal mode)
+		this.inputHintEl = inputBottomEl.createEl('span', {
 			cls: 'lifewiki-input-hint',
-			text: 'Enter 发送 · 最多 250 字'
+			text: 'Enter 发送'
+		});
+
+		// Append mode actions (hidden by default)
+		this.appendModeActionsEl = inputBottomEl.createEl('div', {
+			cls: 'lifewiki-append-mode-actions'
+		});
+
+		// Submit button
+		const submitBtn = this.appendModeActionsEl.createEl('button', {
+			cls: 'lifewiki-append-submit-btn',
+			text: '追加日记'
+		});
+		submitBtn.addEventListener('click', () => {
+			this.submitAppend();
+		});
+
+		// Cancel button
+		const cancelBtn = this.appendModeActionsEl.createEl('button', {
+			cls: 'lifewiki-append-cancel-btn',
+			text: '×'
+		});
+		cancelBtn.addEventListener('click', () => {
+			this.cancelAppendMode();
+		});
+
+		// Arrow button on bottom-right (circular with arrow)
+		const arrowBtn = inputBottomEl.createEl('button', {
+			cls: 'lifewiki-diary-send-btn'
+		});
+		setIcon(arrowBtn, 'arrow-up');
+
+		// Focus handler - scroll to last block
+		this.inputTextarea.addEventListener('focus', () => {
+			// Only scroll to last block when NOT in append mode
+			if (!this.isAppendMode) {
+				this.scrollToLastBlock();
+			}
 		});
 
 		// Input handler
-		textarea.addEventListener('input', () => {
-			this.inputValue = textarea.value;
-			const len = textarea.value.length;
-			hint.setText(`${len}/250 · Enter 发送`);
+		this.inputTextarea.addEventListener('input', () => {
+			this.inputValue = this.inputTextarea.value;
+			const len = this.inputTextarea.value.length;
+			this.inputHintEl.textContent = `${len}/250 · Enter 发送`;
 		});
 
-		// Submit on Enter (without Shift)
-		textarea.addEventListener('keydown', (e) => {
-			if (e.key === 'Enter' && !e.shiftKey) {
-				e.preventDefault();
-				this.submitBlock(textarea);
+		// Handle Enter key for submission
+		this.inputTextarea.addEventListener('keydown', (e) => {
+			if (e.key === 'Enter') {
+				if (this.isAppendMode) {
+					if (!e.shiftKey) {
+						// Enter without Shift: submit child block
+						e.preventDefault();
+						this.submitAppend();
+					}
+					// Shift+Enter: allow newline (default behavior)
+				} else {
+					if (!e.shiftKey) {
+						// Enter without Shift: submit new block
+						e.preventDefault();
+						this.submitBlock(this.inputTextarea);
+					}
+					// Shift+Enter: allow newline (default behavior)
+				}
 			}
 		});
 
-		(this as any).textarea = textarea;
+		(this as any).textarea = this.inputTextarea;
 	}
 
 	/**
@@ -718,7 +1073,7 @@ export class BlockEditorView extends ItemView {
 
 		let currentBlock: ParsedBlock | null = null;
 		let currentContentLines: string[] = [];
-		let currentChildren: string[] = [];
+		let currentChildren: ChildBlock[] = [];
 
 		for (const line of lines) {
 			// Match H3 header: ### HH:mm [source] #category <!-- blockId -->
@@ -740,22 +1095,52 @@ export class BlockEditorView extends ItemView {
 					source: headerMatch[2],
 					category: headerMatch[3],
 					content: '',
-					children: []
+					children: [],
+					parentId: null
 				};
 				currentContentLines = [];
 				currentChildren = [];
 			}
 			// Child block: starts with "- HH:mm " or "- content"
+			// Format: - HH:mm content <!-- childId -->
 			else if (line.startsWith('- ') && currentBlock) {
-				// Extract child content (remove "- " prefix, keep timestamp if present)
-				const childContent = line.substring(2).trim();
-				if (childContent) {
-					currentChildren.push(childContent);
+				// Extract child content and optional ID
+				// Regex: - (HH:mm)? ?(content)? ?(?: <!-- ([a-f0-9-]+) -->)?
+				const childMatch = line.match(/^- (\d{2}:\d{2})?\s*(.+?)?\s*(?:<!-- ([a-f0-9-]+) -->)?$/);
+				if (childMatch) {
+					const childTimestamp = childMatch[1] || '';
+					// Strip HTML comments from child content
+					const childContent = (childMatch[2] || '').replace(/<!--[\s\S]*?-->/g, '').trim();
+					const childId = childMatch[3] || stableId(line);
+
+					if (childContent) {
+						currentChildren.push({
+							id: childId,
+							timestamp: childTimestamp,
+							content: childContent,
+							parentId: currentBlock.id
+						});
+					}
+				} else {
+					// Fallback for simple format without ID - also strip HTML comments
+					const childContent = line.substring(2).replace(/<!--[\s\S]*?-->/g, '').trim();
+					if (childContent) {
+						currentChildren.push({
+							id: stableId(line),
+							timestamp: '',
+							content: childContent,
+							parentId: currentBlock.id
+						});
+					}
 				}
 			}
 			// Content line (not empty, not a header, not blockquote)
 			else if (line.trim() && currentBlock && !line.startsWith('#') && !line.startsWith('>')) {
-				currentContentLines.push(line.trim());
+				// Strip HTML comments from content
+				const cleanLine = line.trim().replace(/<!--[\s\S]*?-->/g, '').trim();
+				if (cleanLine) {
+					currentContentLines.push(cleanLine);
+				}
 			}
 		}
 
@@ -775,6 +1160,11 @@ export class BlockEditorView extends ItemView {
 
 		this.contentContainer.empty();
 
+		// Add Flow Line (vertical line that runs through all blocks)
+		this.flowLineEl = this.contentContainer.createEl('div', {
+			cls: 'flow-line'
+		});
+
 		if (this.blocks.length === 0) {
 			this.renderEmptyState();
 			return;
@@ -784,10 +1174,43 @@ export class BlockEditorView extends ItemView {
 			this.renderBlock(block);
 		}
 
-		// Scroll to last block with smooth behavior, 30px above input area
+		// Extend flow line to the last block
+		this.extendFlowLine();
+
+		// Scroll to last block with smooth behavior, 30px above input area (skip in append mode)
+		if (!this.isAppendMode) {
+			setTimeout(() => {
+				this.scrollToLastBlock();
+			}, 100);
+		}
+	}
+
+	/**
+	 * Extend flow line to reach the last block (parent or child)
+	 */
+	private extendFlowLine() {
+		if (!this.flowLineEl || !this.contentContainer) return;
+
+		// Use setTimeout to ensure DOM layout is complete
 		setTimeout(() => {
-			this.scrollToLastBlock();
-		}, 100);
+			if (!this.flowLineEl || !this.contentContainer) return;
+
+			// Find all block wrappers (parent blocks)
+			const blockWrappers = this.contentContainer.querySelectorAll('.lifewiki-block, .lifewiki-block-group');
+			if (blockWrappers.length === 0) return;
+
+			// Calculate using offsetTop/offsetHeight (not affected by scroll)
+			let maxBottom = 0;
+			for (const wrapper of blockWrappers) {
+				const wrapperBottom = (wrapper as HTMLElement).offsetTop + (wrapper as HTMLElement).offsetHeight;
+				if (wrapperBottom > maxBottom) {
+					maxBottom = wrapperBottom;
+				}
+			}
+
+			// Extend flow line to below the last block
+			this.flowLineEl.style.height = `${maxBottom + 30}px`;
+		}, 50);
 	}
 
 	/**
@@ -807,11 +1230,16 @@ export class BlockEditorView extends ItemView {
 		if (!this.contentContainer) return;
 
 		const isSelected = block.id === this.selectedBlockId;
+		const isEditing = block.id === this.editModeBlockId;
 		const hasChildren = block.children.length > 0;
 
 		// Block wrapper (group if has children, single if not)
+		let wrapperClass = hasChildren ? 'lifewiki-block-group' : 'lifewiki-block';
+		if (isSelected) wrapperClass += ' selected';
+		if (isEditing) wrapperClass += ' editing';
+
 		const blockWrapper = this.contentContainer.createEl('div', {
-			cls: hasChildren ? 'lifewiki-block-group' : 'lifewiki-block',
+			cls: wrapperClass,
 			attr: { 'data-block-id': block.id }
 		});
 
@@ -821,33 +1249,68 @@ export class BlockEditorView extends ItemView {
 		});
 
 		// Inline row: timestamp + tag + content (like child blocks)
-		if (block.content) {
-			// Timestamp
+		if (isEditing) {
+			// Edit mode: show editable fields
+			// Timestamp (read-only)
 			card.createEl('span', {
 				text: block.timestamp,
 				cls: 'lifewiki-block-timestamp'
 			});
 
-			// Tag (between timestamp and content)
-			card.createEl('span', {
-				text: block.category,
-				cls: `lifewiki-block-tag ${block.category}`
-			});
+			// Tag (editable)
+			const tagInput = card.createEl('input', {
+				cls: 'lifewiki-edit-input',
+				attr: { value: block.category, placeholder: '#标签' }
+			}) as HTMLInputElement;
+			tagInput.dataset.field = 'category';
 
-			// Content inline
-			card.createEl('span', {
-				text: block.content,
-				cls: 'lifewiki-block-content'
-			});
+			// Content (editable textarea)
+			const contentTextarea = card.createEl('textarea', {
+				cls: 'lifewiki-edit-textarea',
+				attr: { placeholder: '输入内容...' }
+			}) as HTMLTextAreaElement;
+			contentTextarea.value = block.content;
+			contentTextarea.dataset.field = 'content';
+
+			// Store references for saving
+			(this as any).editTagInput = tagInput;
+			(this as any).editContentTextarea = contentTextarea;
+		} else {
+			// Display mode
+			if (block.content) {
+				// Wrapper: timestamp + tag + content (all inline-flex)
+				const mainWrapper = card.createEl('span', {
+					cls: 'lifewiki-main-wrapper'
+				});
+
+				// Timestamp
+				mainWrapper.createEl('span', {
+					text: block.timestamp,
+					cls: 'lifewiki-block-timestamp'
+				});
+
+				// Tag
+				mainWrapper.createEl('span', {
+					text: block.category,
+					cls: `lifewiki-block-tag ${block.category}`
+				});
+
+				// Content
+				mainWrapper.createEl('span', {
+					text: block.content,
+					cls: 'lifewiki-block-content'
+				});
+			}
 		}
 
-		// Add child button (only when selected) - positioned at end of first line
-		if (isSelected) {
-			card.createEl('button', {
-				text: '+ 子Block',
-				cls: 'lifewiki-add-child-btn'
-			});
-		}
+		// Add child button (only when selected and not editing) - positioned at end of first line
+		// REMOVED: 子Block button functionality - keeping for future use
+		// if (isSelected && !isEditing) {
+		// 	card.createEl('button', {
+		// 		text: '+ 子Block',
+		// 		cls: 'lifewiki-add-child-btn'
+		// 	});
+		// }
 
 		// Children
 		if (hasChildren) {
@@ -856,13 +1319,11 @@ export class BlockEditorView extends ItemView {
 			});
 
 			for (const child of block.children) {
-				// Parse child timestamp if present (format: "HH:mm content" or just "content")
-				const childMatch = child.match(/^(\d{2}:\d{2})\s+(.+)$/);
-				const childTimestamp = childMatch ? childMatch[1] : '';
-				const childContent = childMatch ? childMatch[2] : child;
-
+				const isChildSelected = child.id === this.selectedBlockId;
+				const isChildEditing = (this as any).editingChildId === child.id;
 				const childEl = childrenEl.createEl('div', {
-					cls: 'lifewiki-block-child'
+					cls: 'lifewiki-block-child' + (isChildSelected ? ' selected' : '') + (isChildEditing ? ' editing' : ''),
+					attr: { 'data-child-id': child.id }
 				});
 
 				// Child card
@@ -871,9 +1332,9 @@ export class BlockEditorView extends ItemView {
 				});
 
 				// Child timestamp
-				if (childTimestamp) {
+				if (child.timestamp) {
 					childCard.createEl('span', {
-						text: childTimestamp,
+						text: child.timestamp,
 						cls: 'lifewiki-block-child-timestamp'
 					});
 				}
@@ -883,9 +1344,35 @@ export class BlockEditorView extends ItemView {
 					cls: 'lifewiki-block-child-body'
 				});
 
-				childBody.createEl('div', {
-					text: childContent,
-					cls: 'lifewiki-block-child-content'
+				if (isChildEditing) {
+					// Edit mode: show textarea for content
+					const contentTextarea = childBody.createEl('textarea', {
+						cls: 'lifewiki-edit-textarea',
+						attr: { placeholder: '输入内容...' }
+					}) as HTMLTextAreaElement;
+					contentTextarea.value = child.content;
+					// Store reference for saving
+					(this as any).editContentTextarea = contentTextarea;
+				} else {
+					// Display mode
+					childBody.createEl('div', {
+						text: child.content,
+						cls: 'lifewiki-block-child-content'
+					});
+				}
+
+				// Click handler for child block - load parent session in AI panel
+				childEl.addEventListener('click', (e) => {
+					e.stopPropagation();
+					if (!this.isEditMode) {
+						this.selectChildBlock(child.id, block.id);
+					}
+				});
+
+				// Double-click to edit child block
+				childCard.addEventListener('dblclick', (e) => {
+					e.stopPropagation();
+					this.startChildEditMode(child.id, block.id);
 				});
 			}
 		}
@@ -895,20 +1382,35 @@ export class BlockEditorView extends ItemView {
 			blockWrapper.appendChild(this.childInputEl);
 		}
 
-		// Click to select
+		// Click to select (enter append mode)
 		card.addEventListener('click', () => {
-			this.selectBlock(block.id);
+			if (!this.isEditMode) {
+				this.selectBlock(block.id);
+			}
+		});
+
+		// Double-click to edit
+		card.addEventListener('dblclick', () => {
+			this.startEditMode(block.id);
 		});
 	}
 
 	/**
-	 * Select a block and notify AI panel
+	 * Select a block and enter append mode
 	 */
 	private selectBlock(blockId: string) {
 		// Clear any existing child input
 		this.childInputEl = null;
 
+		// Exit edit mode if active
+		this.isEditMode = false;
+		this.editModeBlockId = null;
+
 		this.selectedBlockId = blockId;
+		this.isAppendMode = true;
+		this.appendModeBlockId = blockId;
+
+		this.updateInputAreaForAppendMode();
 		this.renderBlocks();
 
 		// Notify AI panel
@@ -923,78 +1425,282 @@ export class BlockEditorView extends ItemView {
 	}
 
 	/**
-	 * Show child block input area
+	 * Select a child block and load parent's session in AI panel
 	 */
-	private showChildInput(blockId: string) {
-		const block = this.blocks.find(b => b.id === blockId);
-		if (!block) return;
+	private selectChildBlock(childId: string, parentId: string) {
+		// Clear any existing child input
+		this.childInputEl = null;
 
-		// Create child input container
-		const childInputArea = document.createElement('div');
-		childInputArea.className = 'lifewiki-child-input-area';
+		// Exit edit mode if active
+		this.isEditMode = false;
+		this.editModeBlockId = null;
 
-		const textarea = childInputArea.createEl('textarea', {
-			cls: 'lifewiki-child-input',
-			attr: {
-				placeholder: '添加子Block...',
-				rows: '1'
-			}
-		}) as HTMLTextAreaElement;
+		// Set selected block to child (for visual highlight)
+		this.selectedBlockId = childId;
 
-		const hint = childInputArea.createEl('div', {
-			cls: 'lifewiki-child-input-hint',
-			text: 'Enter 发送 · Shift+Enter 换行'
-		});
+		// Do NOT enter append mode for child blocks
+		this.isAppendMode = false;
+		this.appendModeBlockId = null;
 
-		// Auto-resize textarea
-		textarea.addEventListener('input', () => {
-			textarea.style.height = 'auto';
-			textarea.style.height = textarea.scrollHeight + 'px';
-		});
-
-		// Submit on Enter (without Shift)
-		textarea.addEventListener('keydown', (e) => {
-			if (e.key === 'Enter' && !e.shiftKey) {
-				e.preventDefault();
-				this.submitChildBlock(block.id, textarea.value);
-			}
-		});
-
-		// Store reference and re-render
-		this.childInputEl = childInputArea;
+		// Re-render to show selection
 		this.renderBlocks();
 
-		// Focus the textarea
-		setTimeout(() => textarea.focus(), 0);
+		// Find the parent block and load its session in AI panel
+		const parentBlock = this.blocks.find(b => b.id === parentId);
+		if (parentBlock) {
+			this.selectedBlockContent = parentBlock.content;
+			const aiView = this.plugin.getAIAnalysisView();
+			if (aiView) {
+				// Pass parentId so AI panel knows to load parent's session
+				aiView.setActiveBlock(childId, parentBlock.content, parentId);
+			}
+		}
 	}
 
 	/**
-	 * Submit a child block under the selected parent block
+	 * Start edit mode for a child block
 	 */
-	private async submitChildBlock(parentBlockId: string, content: string) {
-		const trimmedContent = content.trim();
-		if (!trimmedContent) return;
+	private startChildEditMode(childId: string, parentId: string) {
+		// Cancel any active modes
+		this.isAppendMode = false;
+		this.appendModeBlockId = null;
+		this.selectedBlockId = null;
 
-		const parentBlock = this.blocks.find(b => b.id === parentBlockId);
-		if (!parentBlock) return;
+		// Set edit mode state - store child ID in a special field
+		this.editModeBlockId = childId;
+		this.isEditMode = true;
+		(this as any).editingChildId = childId;
+		(this as any).editingParentId = parentId;
 
-		// Add child to local state
-		parentBlock.children.push(trimmedContent);
-
-		// Clear input
-		this.childInputEl = null;
-
-		// Re-render
 		this.renderBlocks();
 
-		// Append child to file
-		await this.appendChildToBlock(parentBlock, trimmedContent);
+		// Focus the content textarea
+		setTimeout(() => {
+			const textarea = this.contentContainer?.querySelector('.lifewiki-edit-textarea') as HTMLTextAreaElement;
+			if (textarea) {
+				textarea.focus();
+				textarea.addEventListener('keydown', this.handleChildEditKeydown.bind(this));
+			}
+		}, 0);
+	}
+
+	/**
+	 * Handle keydown in child edit mode
+	 */
+	private handleChildEditKeydown(e: KeyboardEvent) {
+		if (e.key === 'Enter' && !e.shiftKey) {
+			e.preventDefault();
+			this.saveChildEditMode();
+		} else if (e.key === 'Escape') {
+			this.cancelChildEditMode();
+		}
+	}
+
+	/**
+	 * Cancel child edit mode
+	 */
+	private cancelChildEditMode() {
+		this.isEditMode = false;
+		this.editModeBlockId = null;
+		(this as any).editingChildId = null;
+		(this as any).editingParentId = null;
+		this.renderBlocks();
+	}
+
+	/**
+	 * Save child edit mode changes
+	 */
+	private async saveChildEditMode() {
+		const childId = (this as any).editingChildId;
+		const parentId = (this as any).editingParentId;
+		if (!childId || !parentId) return;
+
+		const parentBlock = this.blocks.find(b => b.id === parentId);
+		if (!parentBlock) return;
+
+		const childIndex = parentBlock.children.findIndex((c: ChildBlock) => c.id === childId);
+		if (childIndex === -1) return;
+
+		const textarea = this.contentContainer?.querySelector('.lifewiki-edit-textarea') as HTMLTextAreaElement;
+		const newContent = textarea?.value.trim() || '';
+
+		// Update child block
+		parentBlock.children[childIndex].content = newContent;
+
+		// Save to file
+		await this.saveBlockToFile(parentBlock);
+
+		// Exit edit mode
+		this.isEditMode = false;
+		this.editModeBlockId = null;
+		(this as any).editingChildId = null;
+		(this as any).editingParentId = null;
+
+		this.renderBlocks();
+	}
+
+	/**
+	 * Update input area for append mode
+	 */
+	private updateInputAreaForAppendMode() {
+		if (!this.inputTextarea || !this.inputHintEl || !this.appendModeActionsEl) {
+			return;
+		}
+
+		const block = this.blocks.find(b => b.id === this.appendModeBlockId);
+
+		if (this.isAppendMode && block) {
+			// Show append mode UI
+			this.inputTextarea.addClass('append-mode');
+			this.inputTextarea.placeholder = '追加记录...';
+			this.inputHintEl.textContent = `将在 ${block.timestamp} 该条日记下追加记录`;
+			this.inputHintEl.setAttribute('style', 'display: none;');
+			this.appendModeActionsEl.classList.add('visible');
+			this.inputTextarea.value = '';
+			this.inputValue = '';
+			setTimeout(() => this.inputTextarea?.focus(), 0);
+		} else {
+			// Normal mode
+			this.inputTextarea.removeClass('append-mode');
+			this.inputTextarea.placeholder = '记录今天的生活...';
+			this.inputHintEl.textContent = 'Enter 发送 · 最多 250 字';
+			this.inputHintEl.removeAttribute('style');
+			this.appendModeActionsEl.classList.remove('visible');
+		}
+	}
+
+	/**
+	 * Cancel append mode
+	 */
+	private cancelAppendMode() {
+		this.isAppendMode = false;
+		this.appendModeBlockId = null;
+		this.selectedBlockId = null;
+		this.updateInputAreaForAppendMode();
+		this.renderBlocks();
+	}
+
+	/**
+	 * Submit append (add child block)
+	 */
+	private async submitAppend() {
+		if (!this.isAppendMode || !this.appendModeBlockId) return;
+
+		const content = this.inputTextarea.value.trim();
+		if (!content) return;
+
+		const parentBlock = this.blocks.find(b => b.id === this.appendModeBlockId);
+		if (!parentBlock) return;
+
+		// Save to file and get the created child block
+		const childBlock = await this.appendChildToBlock(parentBlock, content);
+		if (!childBlock) return;
+
+		// Add child to local state
+		parentBlock.children.push(childBlock);
+
+		// Clear append mode
+		this.inputTextarea.value = '';
+		this.inputValue = '';
+		this.isAppendMode = false;
+		this.appendModeBlockId = null;
+		this.selectedBlockId = null;
+
+		this.updateInputAreaForAppendMode();
+		this.renderBlocks();
+
+		// Start AI analysis for the child block (with parent context)
+		await this.startAIAnalysis(childBlock as any);
+	}
+
+	/**
+	 * Start edit mode for a block
+	 */
+	private startEditMode(blockId: string) {
+		// Cancel append mode first
+		this.isAppendMode = false;
+		this.appendModeBlockId = null;
+		this.selectedBlockId = null;
+
+		this.editModeBlockId = blockId;
+		this.isEditMode = true;
+		this.renderBlocks();
+
+		// Focus the content textarea
+		setTimeout(() => {
+			const textarea = this.contentContainer?.querySelector('.lifewiki-edit-textarea') as HTMLTextAreaElement;
+			if (textarea) {
+				textarea.focus();
+				textarea.addEventListener('keydown', this.handleEditKeydown.bind(this));
+			}
+		}, 0);
+	}
+
+	/**
+	 * Handle keydown in edit mode
+	 */
+	private handleEditKeydown(e: KeyboardEvent) {
+		if (e.key === 'Enter' && !e.shiftKey) {
+			e.preventDefault();
+			this.saveEditMode();
+		} else if (e.key === 'Escape') {
+			this.cancelEditMode();
+		}
+	}
+
+	/**
+	 * Save edit mode changes
+	 */
+	private async saveEditMode() {
+		if (!this.editModeBlockId) return;
+
+		const block = this.blocks.find(b => b.id === this.editModeBlockId);
+		if (!block) return;
+
+		// Get edited values
+		const textarea = this.contentContainer?.querySelector('.lifewiki-edit-textarea') as HTMLTextAreaElement;
+		const tagInput = this.contentContainer?.querySelector('.lifewiki-edit-input') as HTMLInputElement;
+
+		const newContent = textarea?.value.trim() || '';
+		const newCategory = tagInput?.value.trim() || block.category;
+
+		// Update block
+		block.content = newContent;
+		block.category = newCategory;
+
+		// Exit edit mode
+		this.isEditMode = false;
+		this.editModeBlockId = null;
+
+		this.renderBlocks();
+
+		// Save to file
+		await this.saveBlockToFile(block);
+	}
+
+	/**
+	 * Cancel edit mode without saving
+	 */
+	private cancelEditMode() {
+		this.isEditMode = false;
+		this.editModeBlockId = null;
+		this.renderBlocks();
+	}
+
+	/**
+	 * Exit edit mode (called when clicking outside)
+	 */
+	private exitEditMode() {
+		if (this.isEditMode) {
+			this.saveEditMode();
+		}
 	}
 
 	/**
 	 * Append a child block to the parent block in the diary file
+	 * Returns the created ChildBlock object
 	 */
-	private async appendChildToBlock(parentBlock: ParsedBlock, childContent: string) {
+	private async appendChildToBlock(parentBlock: ParsedBlock, childContent: string): Promise<ChildBlock | null> {
 		// Find the diary file
 		const dailyPath = `Daily/${this.currentDate}.md`;
 		let file = this.app.vault.getAbstractFileByPath(dailyPath);
@@ -1007,7 +1713,7 @@ export class BlockEditorView extends ItemView {
 			file = this.app.vault.getAbstractFileByPath(`${DIARY_FOLDER}/${this.currentDate}.md`);
 		}
 
-		if (!(file instanceof TFile)) return;
+		if (!(file instanceof TFile)) return null;
 
 		// Read file and find the parent block to append child after it
 		const content = await this.app.vault.read(file);
@@ -1024,7 +1730,7 @@ export class BlockEditorView extends ItemView {
 			}
 		}
 
-		if (parentLineIndex === -1) return;
+		if (parentLineIndex === -1) return null;
 
 		// Find where the parent block ends (next ### header or end of file)
 		let insertIndex = lines.length;
@@ -1035,13 +1741,93 @@ export class BlockEditorView extends ItemView {
 			}
 		}
 
-		// Build the child line
+		// Build the child block
 		const now = new Date();
 		const childTimestamp = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
-		const childLine = `- ${childTimestamp} ${childContent}`;
+		const childId = uuid();
+
+		// Format: - HH:mm content <!-- childId -->
+		const childLine = `- ${childTimestamp} ${childContent} <!-- ${childId} -->`;
 
 		// Insert the child line
 		lines.splice(insertIndex, 0, childLine);
+
+		// Write back
+		await this.app.vault.modify(file, lines.join('\n'));
+
+		// Return the child block object
+		return {
+			id: childId,
+			timestamp: childTimestamp,
+			content: childContent,
+			parentId: parentBlock.id
+		};
+	}
+
+	/**
+	 * Save a block's changes to the diary file
+	 */
+	private async saveBlockToFile(block: ParsedBlock) {
+		// Find the diary file
+		const dailyPath = `Daily/${this.currentDate}.md`;
+		let file = this.app.vault.getAbstractFileByPath(dailyPath);
+
+		if (!file || !(file instanceof TFile)) {
+			file = this.app.vault.getAbstractFileByPath(`${this.currentDate}.md`);
+		}
+
+		if (!file || !(file instanceof TFile)) {
+			file = this.app.vault.getAbstractFileByPath(`${DIARY_FOLDER}/${this.currentDate}.md`);
+		}
+
+		if (!(file instanceof TFile)) return;
+
+		const content = await this.app.vault.read(file);
+		const lines = content.split('\n');
+
+		// Find the line with the block header (including blockId)
+		let blockLineIndex = -1;
+		for (let i = 0; i < lines.length; i++) {
+			if (lines[i].includes(`### ${block.timestamp}`) && lines[i].includes(block.id)) {
+				blockLineIndex = i;
+				break;
+			}
+		}
+
+		// If not found by id, try by header content
+		if (blockLineIndex === -1) {
+			for (let i = 0; i < lines.length; i++) {
+				if (lines[i].includes(`### ${block.timestamp}`) && lines[i].includes(`#${block.category}`)) {
+					blockLineIndex = i;
+					break;
+				}
+			}
+		}
+
+		if (blockLineIndex === -1) return;
+
+		// Rebuild the block header with blockId
+		const newHeader = `### ${block.timestamp} [${block.source}] #${block.category} <!-- ${block.id} -->`;
+		lines[blockLineIndex] = newHeader;
+
+		// Update content lines (after header, until next ### or child)
+		let updateIndex = blockLineIndex + 1;
+		while (updateIndex < lines.length) {
+			if (lines[updateIndex].startsWith('### ') || (lines[updateIndex].startsWith('- ') && lines[updateIndex].match(/^- \d{2}:\d{2}\s/))) {
+				break;
+			}
+			if (lines[updateIndex].trim() && !lines[updateIndex].startsWith('#')) {
+				lines[updateIndex] = block.content;
+				break;
+			}
+			updateIndex++;
+		}
+
+		// If no existing content line, add content after header
+		if (updateIndex >= lines.length || lines[updateIndex].trim() === '') {
+			// Insert content after header
+			lines.splice(blockLineIndex + 1, 0, block.content);
+		}
 
 		// Write back
 		await this.app.vault.modify(file, lines.join('\n'));
@@ -1063,9 +1849,10 @@ export class BlockEditorView extends ItemView {
 			id: uuid(),
 			timestamp,
 			source: 'Lifewiki',
-			category: '待确认',
+			category: '待分析',
 			content,
-			children: []
+			children: [],
+			parentId: null
 		};
 
 		// Add to local state
@@ -1124,55 +1911,112 @@ export class BlockEditorView extends ItemView {
 	/**
 	 * Start AI analysis for a block
 	 */
-	private async startAIAnalysis(block: ParsedBlock) {
+	private async startAIAnalysis(block: ParsedBlock | ChildBlock) {
 		const sessionManager = this.plugin.getSessionManager();
 		const aiView = this.plugin.getAIAnalysisView();
 
-		// Check if session already has history
-		const existingSession = sessionManager.getSession(block.id);
-		console.log('[BlockEditor] startAIAnalysis for block:', block.id);
-		console.log('[BlockEditor] existingSession:', existingSession ? `messages=${existingSession.messages.length}` : 'null');
-		const hasHistory = existingSession && existingSession.messages && existingSession.messages.length > 0;
-		console.log('[BlockEditor] hasHistory:', hasHistory);
+		// For child blocks, use parent's session
+		const effectiveParentId = (block as any).parentId || null;
 
-		if (hasHistory) {
-			// Load existing session and show history
-			console.log('[BlockEditor] Loading existing session for block:', block.id);
-			if (aiView) {
-				aiView.setActiveBlock(block.id, block.content);
+		console.log('[BlockEditor] startAIAnalysis for block:', block.id, 'parentId:', effectiveParentId);
+
+		// For child blocks, always trigger new AI analysis (skip history check)
+		// For parent blocks, check if session already has history
+		if (!effectiveParentId) {
+			const existingSession = sessionManager.getSession(block.id, effectiveParentId);
+			console.log('[BlockEditor] existingSession:', existingSession ? `messages=${existingSession.messages.length}` : 'null');
+			const hasHistory = existingSession && existingSession.messages && existingSession.messages.length > 0;
+			console.log('[BlockEditor] hasHistory:', hasHistory);
+
+			if (hasHistory) {
+				// Load existing session in AI panel AND enter append mode
+				console.log('[BlockEditor] Loading existing session for block:', block.id);
+				this.selectBlock(block.id); // Enter append mode
+				if (aiView) {
+					aiView.setActiveBlock(block.id, block.content);
+				}
+				return;
 			}
-			return;
 		}
 
-		// Create session first
-		sessionManager.getOrCreateSession(block.id);
+		// Create session first (uses parent's session if child block)
+		sessionManager.getOrCreateSession(block.id, effectiveParentId);
 
 		let result: any;
 
+		// Build sibling blocks list for child block context
+		const siblingBlocks: { id: string; content: string }[] = [];
+		if (effectiveParentId) {
+			const parentBlock = this.blocks.find(b => b.id === effectiveParentId);
+			if (parentBlock) {
+				// Get other siblings' id and content
+				for (const sibling of parentBlock.children) {
+					if (sibling.id !== block.id) {
+						siblingBlocks.push({ id: sibling.id, content: sibling.content });
+					}
+				}
+			}
+		}
+
 		try {
-			// Use LangGraph agent if enabled, otherwise use ConversationFlow
-			if (this.plugin.settings.useLangGraph && this.plugin.getLangGraphAgent()) {
+			// Use LangGraph agent
+			const agent = this.plugin.getLangGraphAgent();
+			if (agent) {
 				console.log('[BlockEditor] Using LangGraph agent');
-				const agent = this.plugin.getLangGraphAgent()!;
-				result = await agent.startBlockAnalysis(block.id, block.content);
+				result = await agent.startBlockAnalysis(block.id, block.content, effectiveParentId, siblingBlocks);
 			} else {
-				console.log('[BlockEditor] Using ConversationFlow, useLangGraph:', this.plugin.settings.useLangGraph);
-				const flow = this.plugin.getConversationFlow();
-				result = await flow.startBlockAnalysis(block.id, block.content);
+				console.error('[BlockEditor] No AI agent available');
+				throw new Error('AI agent not available');
 			}
 
 			console.log('[BlockEditor] AI result:', JSON.stringify(result));
 
-			// Notify AI panel
+			// Notify AI panel - use parent's content if child block
 			if (aiView) {
-				aiView.startNewSession(block.id, block.content, result.initialResponse || '');
+				const displayContent = effectiveParentId
+					? this.blocks.find(b => b.id === effectiveParentId)?.content || block.content
+					: block.content;
+				aiView.startNewSession(block.id, displayContent, result.initialResponse || '', effectiveParentId);
+			}
+
+			// Update block category based on AI analysis result (only for parent blocks with initial placeholder)
+			if (!effectiveParentId && (block as ParsedBlock).category === '待分析' && result.areas && result.areas.length > 0) {
+				const newCategory = result.areas[0];
+				console.log('[BlockEditor] Updating block category from', (block as ParsedBlock).category, 'to', newCategory);
+				(block as ParsedBlock).category = newCategory;
+				await this.saveBlockToFile(block as ParsedBlock);
+				// Refresh the view to show updated category tag
+				this.renderBlocks();
 			}
 		} catch (error) {
 			console.error('[BlockEditor] AI analysis failed:', error);
 			// Show error in AI panel
 			if (aiView) {
-				aiView.startNewSession(block.id, block.content, `错误: ${(error as Error).message}`);
+				const displayContent = effectiveParentId
+					? this.blocks.find(b => b.id === effectiveParentId)?.content || block.content
+					: block.content;
+				aiView.startNewSession(block.id, displayContent, `错误: ${(error as Error).message}`);
 			}
+		}
+	}
+
+	/**
+	 * Update block category based on AI area analysis
+	 */
+	private async updateBlockCategory(block: ParsedBlock) {
+		try {
+			const provider = this.plugin.getAIProvider();
+			const analysisResult = await provider.analyzeBlock(block.content);
+
+			if (analysisResult.areas && analysisResult.areas.length > 0) {
+				const newCategory = analysisResult.areas[0];
+				console.log('[BlockEditor] Updating block category from', block.category, 'to', newCategory);
+
+				block.category = newCategory;
+				await this.saveBlockToFile(block);
+			}
+		} catch (error) {
+			console.error('[BlockEditor] Failed to update block category:', error);
 		}
 	}
 

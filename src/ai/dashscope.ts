@@ -140,13 +140,16 @@ export class DashScopeProvider {
     const blockId = this.generateId();
     const timestamp = new Date().toISOString();
 
-    const systemPrompt = `你是一个日记分析助手。请分析以下日记内容，识别人脉、项目、物品、想法和知识。
+    const systemPrompt = `你是一个日记分析助手。请分析以下日记内容，识别人脉、项目、物品、想法和知识，并判断日记所属领域。
 
 日记内容：
 ${content}
 
+可用领域（可多选，最多2个）：工作、个人、学习、其他
+
 请以JSON格式返回分析结果，包含：
 - category: 工作/个人
+- areas: 领域数组，最多2个，如["工作"]或["工作","学习"]
 - entities: 识别的实体（人脉/项目/物品/想法/知识）
 - needsConfirmation: 需要用户确认的实体名称数组
 - response: 对用户的简短回复（100字以内）
@@ -154,6 +157,7 @@ ${content}
 JSON格式：
 {
   "category": "工作",
+  "areas": ["工作", "学习"],
   "entities": {
     "people": [{"name": "姓名", "confidence": 0.9, "context": "上下文"}],
     "projects": [],
@@ -173,6 +177,7 @@ JSON格式：
     // Parse JSON response
     let parsed = {
       category: '待确认' as '工作' | '个人' | '待确认',
+      areas: [] as string[],
       entities: {
         people: [] as EntityPreview[],
         projects: [] as EntityPreview[],
@@ -234,7 +239,8 @@ JSON格式：
             }))
           },
           needsConfirmation: json.needsConfirmation || [],
-          response: json.response || response.content
+          response: json.response || response.content,
+          areas: this.parseAreas(json.areas)
         };
       }
     } catch (error) {
@@ -246,10 +252,22 @@ JSON格式：
       blockId,
       timestamp,
       category: parsed.category,
+      areas: parsed.areas,
       entities: parsed.entities,
       needsConfirmation: parsed.needsConfirmation,
       aiResponse: parsed.response
     };
+  }
+
+  /**
+   * Parse areas from AI response, ensuring max 2 and valid area names
+   */
+  private parseAreas(areas: unknown): string[] {
+    const validAreas = ['工作', '个人', '学习', '其他'];
+    if (!Array.isArray(areas)) return [];
+    return areas
+      .filter((a): a is string => typeof a === 'string' && validAreas.includes(a))
+      .slice(0, 2);
   }
 
   isReady(): boolean {

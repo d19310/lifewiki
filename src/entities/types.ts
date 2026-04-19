@@ -73,6 +73,7 @@ export interface Block {
 	parentId: string | null; // null for top-level blocks
 	children: string[];      // Child block IDs
 	category: '工作' | '个人' | '待确认';
+	areas: string[];        // Areas/tags, e.g. ['工作', '学习']
 	source: 'Lifewiki' | string;  // Channel/source
 	aiAnalysis?: AnalysisResult;
 }
@@ -81,6 +82,7 @@ export interface AnalysisResult {
 	blockId: string;
 	timestamp: string;      // ISO 8601
 	category: '工作' | '个人' | '待确认';
+	areas: string[];       // AI-determined areas, e.g. ['工作', '学习']
 	source?: string;
 	entities: {
 		people: EntityPreview[];

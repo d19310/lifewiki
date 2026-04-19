@@ -177,6 +177,7 @@ ${content}`;
       blockId,
       timestamp,
       category: '待确认',
+      areas: [],
       entities: {
         people: [],
         projects: [],
@@ -187,6 +188,14 @@ ${content}`;
       needsConfirmation: [],
       aiResponse: response
     };
+  }
+
+  private parseAreas(areas: unknown): string[] {
+    const validAreas = ['工作', '个人', '学习', '其他'];
+    if (!Array.isArray(areas)) return [];
+    return areas
+      .filter((a): a is string => typeof a === 'string' && validAreas.includes(a))
+      .slice(0, 2);
   }
 
   isReady(): boolean {

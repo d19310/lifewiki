@@ -97,14 +97,18 @@ export class SessionManager {
 
 	/**
 	 * Get or create a session for a block
+	 * If the block is a child block (has parentId), route to parent's session
 	 */
-	getOrCreateSession(blockId: string): BlockSession {
-		let session = this.sessions.get(blockId);
+	getOrCreateSession(blockId: string, parentId: string | null = null): BlockSession {
+		// If this is a child block, use parent's session
+		const effectiveBlockId = parentId || blockId;
+
+		let session = this.sessions.get(effectiveBlockId);
 
 		if (!session) {
 			const now = new Date().toISOString();
 			session = {
-				blockId,
+				blockId: effectiveBlockId,
 				content: '',
 				messages: [],
 				analysisResult: null,
@@ -112,8 +116,8 @@ export class SessionManager {
 				updatedAt: now,
 				currentPhase: AnalysisPhase.People
 			};
-			this.sessions.set(blockId, session);
-			this.saveSession(blockId);
+			this.sessions.set(effectiveBlockId, session);
+			this.saveSession(effectiveBlockId);
 		}
 
 		return session;
@@ -121,63 +125,73 @@ export class SessionManager {
 
 	/**
 	 * Get session by blockId
+	 * If block is a child block, returns parent's session
 	 */
-	getSession(blockId: string): BlockSession | undefined {
-		return this.sessions.get(blockId);
+	getSession(blockId: string, parentId: string | null = null): BlockSession | undefined {
+		const effectiveBlockId = parentId || blockId;
+		return this.sessions.get(effectiveBlockId);
 	}
 
 	/**
 	 * Add a message to a session
+	 * If block is a child, routes to parent's session
 	 */
-	addMessage(blockId: string, message: ChatMessage): BlockSession | undefined {
-		const session = this.sessions.get(blockId);
+	addMessage(blockId: string, message: ChatMessage, parentId: string | null = null): BlockSession | undefined {
+		const effectiveBlockId = parentId || blockId;
+		const session = this.sessions.get(effectiveBlockId);
 		if (!session) return undefined;
 
 		session.messages.push(message);
 		session.updatedAt = new Date().toISOString();
-		this.saveSession(blockId);
+		this.saveSession(effectiveBlockId);
 
 		return session;
 	}
 
 	/**
 	 * Update the current analysis phase for a session
+	 * If block is a child, routes to parent's session
 	 */
-	updatePhase(blockId: string, phase: AnalysisPhase): boolean {
-		const session = this.sessions.get(blockId);
+	updatePhase(blockId: string, phase: AnalysisPhase, parentId: string | null = null): boolean {
+		const effectiveBlockId = parentId || blockId;
+		const session = this.sessions.get(effectiveBlockId);
 		if (!session) return false;
 
 		session.currentPhase = phase;
 		session.updatedAt = new Date().toISOString();
-		this.saveSession(blockId);
+		this.saveSession(effectiveBlockId);
 
 		return true;
 	}
 
 	/**
 	 * Set the analysis result for a session
+	 * If block is a child, routes to parent's session
 	 */
-	setAnalysisResult(blockId: string, result: AnalysisResult): boolean {
-		const session = this.sessions.get(blockId);
+	setAnalysisResult(blockId: string, result: AnalysisResult, parentId: string | null = null): boolean {
+		const effectiveBlockId = parentId || blockId;
+		const session = this.sessions.get(effectiveBlockId);
 		if (!session) return false;
 
 		session.analysisResult = result;
 		session.updatedAt = new Date().toISOString();
-		this.saveSession(blockId);
+		this.saveSession(effectiveBlockId);
 
 		return true;
 	}
 
 	/**
 	 * Set the content for a session
+	 * If block is a child, routes to parent's session
 	 */
-	setContent(blockId: string, content: string): boolean {
-		const session = this.sessions.get(blockId);
+	setContent(blockId: string, content: string, parentId: string | null = null): boolean {
+		const effectiveBlockId = parentId || blockId;
+		const session = this.sessions.get(effectiveBlockId);
 		if (!session) return false;
 
 		session.content = content;
 		session.updatedAt = new Date().toISOString();
-		this.saveSession(blockId);
+		this.saveSession(effectiveBlockId);
 
 		return true;
 	}

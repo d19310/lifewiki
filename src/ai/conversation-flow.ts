@@ -696,6 +696,11 @@ list_entities: {"entityType": "person"}
 
 ## 关键提醒
 
+**【重要】处理网页链接：**
+当日记中出现 URL 时，必须**立即**调用 clip_and_summarize 工具抓取内容，不能只创建空实体！
+- 调用格式：<function_calls><invoke name="clip_and_summarize"><parameter name="url">网页URL</parameter></invoke></function_calls>
+- 获得结果后，再创建 knowledge 实体，metadata 中包含 url、title、summary、content
+
 **不要在回复文本中伪造函数执行结果！** 不要写 "[函数执行结果: ...JSON...]" 这种文本，除非是真正调用了函数后的结果会被系统自动插入。
 
 如果需要进行操作，必须使用真实的函数调用格式：

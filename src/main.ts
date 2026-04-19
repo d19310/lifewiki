@@ -58,18 +58,16 @@ export default class LifeWikiPlugin extends Plugin {
 			this.conversationFlow.setEntityManager(this.entityManager);
 			await this.conversationFlow.initialize();
 
-			// Initialize LangGraph agent if enabled
-			if (this.settings.useLangGraph) {
-				console.log('LifeWiki: Initializing LangGraph agent...');
-				this.langGraphAgent = createLangGraphAgent(
-					this.aiProvider,
-					this.entityManager,
-					this.app,
-					this.settings.systemPrompt
-				);
-				await this.langGraphAgent.initialize();
-				console.log('LifeWiki: LangGraph agent initialized');
-			}
+			// Initialize LangGraph agent
+			console.log('LifeWiki: Initializing LangGraph agent...');
+			this.langGraphAgent = createLangGraphAgent(
+				this.aiProvider,
+				this.entityManager,
+				this.app,
+				this.settings.systemPrompt
+			);
+			await this.langGraphAgent.initialize();
+			console.log('LifeWiki: LangGraph agent initialized');
 
 			this.registerView(VIEW_TYPE_BLOCK_EDITOR, (leaf) => new BlockEditorView(leaf, this));
 			this.registerView(VIEW_TYPE_AI_ANALYSIS, (leaf) => {
@@ -218,6 +216,10 @@ export default class LifeWikiPlugin extends Plugin {
 
 	getConversationFlow(): ConversationFlow {
 		return this.conversationFlow;
+	}
+
+	getAIProvider(): AIProvider {
+		return this.aiProvider;
 	}
 
 	getLangGraphAgent(): LangGraphAgent | undefined {

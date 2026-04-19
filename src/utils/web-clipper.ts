@@ -10,6 +10,8 @@
  * Uses Turndown for HTML to Markdown conversion
  */
 
+import Turndown from 'turndown';
+
 export interface ClipResult {
 	title: string;
 	content: string;
@@ -19,16 +21,6 @@ export interface ClipResult {
 	clippedAt: string;
 	error?: string;
 	truncated?: boolean;
-}
-
-// Lazy import for Turndown (browser-compatible)
-let TurndownService: any;
-
-async function loadTurndown() {
-	if (!TurndownService) {
-		const turndownModule = await import('turndown');
-		TurndownService = turndownModule.default;
-	}
 }
 
 // URL extraction regex
@@ -154,9 +146,6 @@ async function clipGenericWebpage(url: string): Promise<ClipResult> {
 		clippedAt: new Date().toISOString(),
 	};
 
-	// Load Turndown lazily
-	await loadTurndown();
-
 	// Fetch webpage
 	const { html } = await fetchWebpage(url);
 
@@ -176,7 +165,7 @@ async function clipGenericWebpage(url: string): Promise<ClipResult> {
 	const content = extractMainContent(doc);
 
 	// Convert HTML to Markdown using Turndown
-	const turndown = new TurndownService({
+	const turndown = new Turndown({
 		headingStyle: 'atx',
 		codeBlockStyle: 'fenced',
 	});
@@ -203,9 +192,6 @@ async function clipWechatArticle(url: string): Promise<ClipResult> {
 		url,
 		clippedAt: new Date().toISOString(),
 	};
-
-	// Load Turndown lazily
-	await loadTurndown();
 
 	try {
 		const { html } = await fetchWebpage(url);
@@ -240,7 +226,7 @@ async function clipWechatArticle(url: string): Promise<ClipResult> {
 			);
 
 			// Convert to Markdown
-			const turndown = new TurndownService({
+			const turndown = new Turndown({
 				headingStyle: 'atx',
 				codeBlockStyle: 'fenced',
 			});
