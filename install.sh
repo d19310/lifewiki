@@ -14,12 +14,11 @@ NC='\033[0m' # No Color
 
 # 默认配置
 PLUGIN_NAME="lifewiki"
-DEFAULT_VAULT_NAME="LifeWiki Vault"
+DEFAULT_VAULT_PATH="$HOME/lifewiki-vault"
 OBSIDIAN_PLUGINS_DIR="$HOME/Library/Application Support/obsidian/plugins"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # 解析参数
-VAULT_NAME=""
 VAULT_PATH=""
 SKIP_BUILD=false
 
@@ -27,14 +26,12 @@ usage() {
     echo "用法: $0 [选项]"
     echo ""
     echo "选项:"
-    echo "  -d, --directory <路径>      指定 vault 安装路径 (默认: ~/${DEFAULT_VAULT_NAME})"
-    echo "  -v, --vault-name <名称>     指定 vault 名称 (与 -d 互斥)"
+    echo "  -d, --directory <路径>      指定 vault 安装路径"
     echo "  -s, --skip-build            跳过 npm build (使用已编译的 main.js)"
     echo "  -h, --help                  显示帮助"
     echo ""
     echo "示例:"
-    echo "  $0                                    # 使用默认名称安装到 ~/LifeWiki Vault"
-    echo "  $0 -v \"我的日记\"                      # 创建名为\"我的日记\"的 vault"
+    echo "  $0                                    # 交互式选择安装路径"
     echo "  $0 -d \"/Users/me/docs/lifewiki\"       # 安装到指定路径"
     exit 1
 }
@@ -58,10 +55,6 @@ while [[ $# -gt 0 ]]; do
             VAULT_PATH="$2"
             shift 2
             ;;
-        -v|--vault-name)
-            VAULT_NAME="$2"
-            shift 2
-            ;;
         -s|--skip-build)
             SKIP_BUILD=true
             shift
@@ -83,7 +76,7 @@ if [ -n "$VAULT_PATH" ] && [ -n "$VAULT_NAME" ]; then
 fi
 
 if [ -z "$VAULT_PATH" ] && [ -z "$VAULT_NAME" ]; then
-    VAULT_NAME="$DEFAULT_VAULT_NAME"
+    VAULT_PATH="$DEFAULT_VAULT_PATH"
 fi
 
 # 如果指定了目录路径，展开 ~ 和相对路径
@@ -108,6 +101,34 @@ check_system() {
     fi
 
     log_info "系统检查通过"
+}
+
+# 询问用户 vault 路径
+ask_vault_path() {
+    if [ -n "$VAULT_PATH" ] || [ -n "$VAULT_NAME" ]; then
+        # 命令行已指定，使用命令行参数
+        return 0
+    fi
+
+    echo ""
+    echo "========================================"
+    echo "       配置 Vault 安装路径"
+    echo "========================================"
+    echo ""
+    echo "LifeWiki 需要一个 Obsidian Vault 来存储你的日记和笔记"
+    echo ""
+    echo "默认安装路径: ${DEFAULT_VAULT_PATH}"
+    echo ""
+    read -p "请输入 Vault 安装路径 (直接回车使用默认路径): " -r VAULT_PATH
+    echo
+
+    if [ -z "$VAULT_PATH" ]; then
+        VAULT_PATH="$DEFAULT_VAULT_PATH"
+    fi
+
+    # 展开 ~ 并转为绝对路径
+    VAULT_PATH="${VAULT_PATH/#\~/$HOME}"
+    VAULT_PATH="$(cd "$(dirname "$VAULT_PATH")" && pwd)/$(basename "$VAULT_PATH")"
 }
 
 # 检查并安装/升级 Obsidian
@@ -243,11 +264,6 @@ check_dependencies() {
 
 # 创建 vault 目录结构
 create_vault() {
-    # 如果没有指定路径，从名称构建
-    if [ -z "$VAULT_PATH" ]; then
-        VAULT_PATH="$HOME/${VAULT_NAME}"
-    fi
-
     log_info "创建 Vault: ${VAULT_PATH}"
 
     if [ -d "$VAULT_PATH" ]; then
@@ -393,7 +409,8 @@ main() {
     check_system
     check_obsidian
     check_dependencies
-    VAULT_PATH=$(create_vault)
+    ask_vault_path
+    create_vault
     install_plugin
     enable_plugin
     open_obsidian
