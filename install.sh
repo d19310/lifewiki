@@ -193,62 +193,58 @@ check_obsidian() {
 check_dependencies() {
     log_info "检查依赖环境..."
 
-    local node_missing=false
-    local npm_missing=false
-
     # 检查 Node.js
-    if ! command -v node &> /dev/null; then
-        node_missing=true
-        log_warn "未找到 Node.js"
+    if command -v node &> /dev/null; then
+        log_info "Node.js: $(node --version)"
     else
-        local node_version=$(node --version)
-        log_info "Node.js: ${node_version}"
+        log_warn "未找到 Node.js"
     fi
 
     # 检查 npm
-    if ! command -v npm &> /dev/null; then
-        npm_missing=true
-        log_warn "未找到 npm"
+    if command -v npm &> /dev/null; then
+        log_info "npm: $(npm --version)"
     else
-        local npm_version=$(npm --version)
-        log_info "npm: ${npm_version}"
+        log_warn "未找到 npm"
     fi
 
     # 如果都存在，跳过
-    if [[ "$node_missing" == false && "$npm_missing" == false ]]; then
-        log_info "依赖检查通过，跳过安装"
+    if command -v node &> /dev/null && command -v npm &> /dev/null; then
+        log_info "依赖检查通过"
         return 0
     fi
 
-    # 缺少依赖，提示用户
+    # 缺少依赖，自动安装
     echo ""
     echo "========================================"
-    log_warn "缺少必要依赖: Node.js 和 npm"
+    log_warn "缺少必要依赖"
     echo "========================================"
     echo ""
     echo "LifeWiki 插件需要 Node.js 来构建项目。"
     echo ""
-    echo "推荐使用 Homebrew 安装 (https://brew.sh):"
-    echo "  brew install node"
-    echo ""
-    echo "或访问 Node.js 官网下载安装包:"
-    echo "  https://nodejs.org"
-    echo ""
 
-    read -p "是否现在安装 Node.js (通过 Homebrew)? (y/n) " -n 1 -r
+    read -p "是否现在自动安装? (y/n) " -n 1 -r
     echo
     if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        log_info "安装取消。你可以稍后手动安装 Node.js 后重新运行此脚本"
+        log_info "安装取消。你可以稍后手动安装后重新运行此脚本"
         exit 0
     fi
 
-    # 检查 Homebrew
+    # 检查并安装 Homebrew
     if ! command -v brew &> /dev/null; then
-        log_error "未找到 Homebrew。请先安装 Homebrew: https://brew.sh"
-        echo "或手动下载 Node.js: https://nodejs.org"
+        log_info "正在安装 Homebrew..."
+        /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+    fi
+
+    # 检查 Homebrew 是否安装成功
+    if ! command -v brew &> /dev/null; then
+        log_error "Homebrew 安装失败，请手动安装 Node.js: https://nodejs.org"
         exit 1
     fi
 
+    # 初始化 Homebrew
+    eval "$(brew shellenv)"
+
+    # 安装 Node.js
     log_info "正在安装 Node.js..."
     brew install node
 
@@ -258,7 +254,7 @@ check_dependencies() {
         log_info "Node.js: $(node --version)"
         log_info "npm: $(npm --version)"
     else
-        log_error "依赖安装失败，请手动安装 Node.js"
+        log_error "依赖安装失败，请手动安装 Node.js: https://nodejs.org"
         exit 1
     fi
 }
