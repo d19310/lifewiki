@@ -110,6 +110,7 @@
 	display: flex;
 	flex-direction: column;
 	background: transparent !important;
+	min-height: 0;
 }
 
 .lifewiki-ai-scroll::-webkit-scrollbar {
@@ -158,6 +159,7 @@
 	flex-direction: column;
 	gap: 16px;
 	padding-bottom: 16px;
+	margin-bottom: 150px;
 	background: transparent;
 }
 
@@ -334,16 +336,28 @@
 	border: none !important;
 	border-radius: 50% !important;
 	background: var(--on-surface-variant) !important;
-	color: var(--surface-container-lowest) !important;
+	color: #ffffff !important;
 	cursor: pointer;
-	transition: background 0.15s, color 0.15s;
+	transition: background-color 0.2s, transform 0.2s;
 	flex-shrink: 0;
 	margin-bottom: 2px;
 }
 
+/* Inactive state - light gray */
+.lifewiki-send-btn:not(.active) {
+	background: var(--surface-container-high) !important;
+	color: var(--text-muted) !important;
+}
+
+/* Active state - highlighted */
+.lifewiki-send-btn.active {
+	background: var(--interactive-accent) !important;
+	color: var(--background) !important;
+}
+
 .lifewiki-chat-input-wrapper:focus-within .lifewiki-send-btn {
-	background: var(--primary);
-	color: var(--on-primary);
+	background: var(--interactive-accent) !important;
+	color: var(--background) !important;
 }
 
 .lifewiki-model-select {

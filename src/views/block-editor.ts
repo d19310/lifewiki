@@ -158,6 +158,12 @@ export class BlockEditorView extends ItemView {
 			if (this.isEditMode && !target.closest('.lifewiki-block.editing, .lifewiki-block-group.editing, .lifewiki-block-child.editing')) {
 				this.exitEditMode();
 			}
+			// Clear selection and AI panel when clicking on empty space
+			if (!this.isAppendMode && !this.isEditMode && !target.closest('.lifewiki-block, .lifewiki-block-group, .lifewiki-block-child')) {
+				this.selectedBlockId = null;
+				const aiView = this.plugin.getAIAnalysisView();
+				aiView?.clearConversation();
+			}
 		});
 	}
 
@@ -1134,6 +1140,7 @@ export class BlockEditorView extends ItemView {
 							content: childContent,
 							parentId: currentBlock.id
 						});
+						continue; // Don't treat child line as parent content
 					}
 				} else {
 					// Fallback for simple format without ID - also strip HTML comments
@@ -1149,6 +1156,7 @@ export class BlockEditorView extends ItemView {
 							parentId: currentBlock.id
 						});
 					}
+					continue; // Don't treat child line as parent content
 				}
 			}
 			// Content line (not empty, not a header, not blockquote)

@@ -12,6 +12,7 @@ export const VIEW_TYPE_AI_ANALYSIS = 'lifewiki-ai-analysis';
 export class AIAnalysisPanelView extends ItemView {
 	private plugin: LifeWikiPlugin;
 	private activeBlockId: string | null = null;
+	private activeParentId: string | null = null; // Parent ID when in child block context
 	private chatMessagesEl: HTMLElement | null = null;
 	private inputTextarea: HTMLTextAreaElement | null = null;
 	private sendBtnEl: HTMLElement | null = null;
@@ -263,6 +264,7 @@ export class AIAnalysisPanelView extends ItemView {
 	display: flex;
 	flex-direction: column;
 	background: transparent !important;
+	min-height: 0;
 }
 
 .lifewiki-ai-scroll::-webkit-scrollbar {
@@ -314,6 +316,7 @@ export class AIAnalysisPanelView extends ItemView {
 	flex-direction: column;
 	gap: 16px;
 	padding-bottom: 16px;
+	margin-bottom: 150px;
 	background: transparent;
 }
 
@@ -603,7 +606,7 @@ export class AIAnalysisPanelView extends ItemView {
 		this.chatMessagesEl?.addClass('visible');
 	}
 
-	private clearConversation() {
+	public clearConversation() {
 		this.chatMessagesEl?.empty();
 		this.activeBlockId = null;
 		this.showEmptyState();
@@ -643,6 +646,7 @@ export class AIAnalysisPanelView extends ItemView {
 
 	setActiveBlock(blockId: string, blockContent: string, parentId?: string | null) {
 		this.activeBlockId = blockId;
+		this.activeParentId = parentId || null;
 		const sessionManager = this.plugin.getSessionManager();
 		// Use parent's session if this is a child block
 		const session = sessionManager.getOrCreateSession(blockId, parentId || null);
@@ -652,6 +656,7 @@ export class AIAnalysisPanelView extends ItemView {
 
 	startNewSession(blockId: string, blockContent: string, initialResponse: string, parentId: string | null = null) {
 		this.activeBlockId = blockId;
+		this.activeParentId = parentId;
 		this.showChatState();
 
 		if (this.chatMessagesEl) {
@@ -683,7 +688,7 @@ export class AIAnalysisPanelView extends ItemView {
 	updateAnalysis(result: AnalysisResult) {
 		if (!this.activeBlockId) return;
 		const sessionManager = this.plugin.getSessionManager();
-		sessionManager.setAnalysisResult(this.activeBlockId, result);
+		sessionManager.setAnalysisResult(this.activeBlockId, result, this.activeParentId);
 		if (result.aiResponse) {
 			this.addChatMessage('assistant', result.aiResponse);
 		}
@@ -746,7 +751,7 @@ export class AIAnalysisPanelView extends ItemView {
 		sessionManager.addMessage(this.activeBlockId, {
 			role: 'user',
 			content
-		});
+		}, this.activeParentId);
 
 		try {
 			let result: any;
@@ -787,7 +792,7 @@ export class AIAnalysisPanelView extends ItemView {
 				sessionManager.addMessage(this.activeBlockId, {
 					role: 'assistant',
 					content: aiContent
-				});
+				}, this.activeParentId);
 			}
 		} catch (error) {
 			console.error('AI chat error:', error);
