@@ -136,56 +136,20 @@ check_obsidian() {
         exit 0
     fi
 
-    # 自动下载并安装 Obsidian
-    log_info "正在下载最新 Obsidian..."
-
-    local temp_dir="/tmp/lifewiki-obsidian-update"
-    local dmg_path="${temp_dir}/Obsidian.dmg"
-
-    rm -rf "$temp_dir"
-    mkdir -p "$temp_dir"
-
-    # 从 GitHub 下载最新 DMG
-    local download_url="https://github.com/obsidianmd/obsidian-releases/releases/download/latest/obsidian-installer.dmg"
-    curl -L -o "$dmg_path" "$download_url" 2>&1 | tail -3
-
-    if [ ! -f "$dmg_path" ] || [ ! -s "$dmg_path" ]; then
-        log_error "下载失败，尝试备选方案..."
-        # 备选: 直接从 obsidian.md 下载
-        download_url="https://obsidian.md/public/obsidian-installer.dmg"
-        curl -L -o "$dmg_path" "$download_url" 2>&1 | tail -3
+    # 通过 Homebrew 安装/升级 Obsidian
+    if ! command -v brew &> /dev/null; then
+        log_info "正在安装 Homebrew..."
+        /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+        eval "$(brew shellenv)"
     fi
 
-    if [ ! -f "$dmg_path" ] || [ ! -s "$dmg_path" ]; then
-        log_error "下载失败，请手动下载 Obsidian: https://obsidian.md"
-        exit 1
-    fi
-
-    # 挂载 DMG
-    log_info "正在安装 Obsidian..."
-
-    local mount_point="/Volumes/Obsidian"
-    hdiutil attach "$dmg_path" -mountpoint "$mount_point" -nobrowse 2>/dev/null
-
-    if [ -d "${mount_point}/Obsidian.app" ]; then
-        # 替换应用
-        rm -rf "/Applications/Obsidian.app"
-        cp -R "${mount_point}/Obsidian.app" "/Applications/"
-        log_info "Obsidian 升级成功!"
-    else
-        log_error "安装失败，请手动下载 Obsidian: https://obsidian.md"
-        hdiutil detach "$mount_point" 2>/dev/null
-        exit 1
-    fi
-
-    # 卸载 DMG
-    hdiutil detach "$mount_point" 2>/dev/null
-    rm -rf "$temp_dir"
+    log_info "正在安装/升级 Obsidian..."
+    brew install --cask obsidian
 
     # 验证新版本
     local new_version=$(defaults read "/Applications/Obsidian.app/Contents/Info.plist" CFBundleShortVersionString 2>/dev/null || echo "")
     if [ -n "$new_version" ]; then
-        log_info "当前版本: ${new_version}"
+        log_info "Obsidian 版本: ${new_version}"
     fi
 }
 
