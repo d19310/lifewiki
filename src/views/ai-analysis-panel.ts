@@ -113,7 +113,7 @@ export class AIAnalysisPanelView extends ItemView {
 		this.inputTextarea = inputRow.createEl('textarea', {
 			cls: 'lifewiki-input-textarea',
 			attr: {
-				placeholder: 'Ask context...',
+				placeholder: '输入你的回复...',
 				rows: '1'
 			}
 		}) as HTMLTextAreaElement;
@@ -170,44 +170,425 @@ export class AIAnalysisPanelView extends ItemView {
 	private addStyles() {
 		const styleEl = document.createElement('style');
 		styleEl.textContent = `
-			/* AI Analysis Panel Styles - FORCED */
-			.lifewiki-chat-msg.assistant {
-				align-self: flex-start !important;
-				background: #ffffff !important;
-				color: #1a1c1c !important;
-				border-radius: 12px !important;
-				border: 1px solid rgba(204, 195, 214, 0.15) !important;
-				box-shadow: 0 4px 20px -4px rgba(26, 28, 28, 0.04) !important;
-				max-width: 80% !important;
-				padding: 12px 16px !important;
-			}
+/* AI Analysis Panel - "The Intellectual Atelier" Design System */
 
-			.lifewiki-chat-msg.user {
-				align-self: flex-end !important;
-				background: #e8e8e8 !important;
-				color: #1a1c1c !important;
-				border-radius: 12px !important;
-				border: 1px solid rgba(204, 195, 214, 0.15) !important;
-				max-width: 80% !important;
-				padding: 12px 16px !important;
-			}
+:root {
+	--surface: #f9f9f9;
+	--surface-container-low: #f3f3f3;
+	--surface-container-lowest: #ffffff;
+	--surface-container-high: #e8e8e8;
+	--surface-variant: #e2e2e2;
+	--on-surface: #1a1c1c;
+	--on-surface-variant: #4a4453;
+	--outline-variant: rgba(204, 195, 214, 0.4);
+	--outline: #7b7485;
+	--primary: #5c28b8;
+	--primary-container: #7546d2;
+	--on-primary: #ffffff;
+	--on-primary-container: #eadcff;
+	--secondary: #67558e;
+	--font-body: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
 
-			.lifewiki-chat-messages {
-				display: flex !important;
-				flex-direction: column !important;
-				gap: 16px !important;
-				padding-bottom: 16px !important;
-				background: transparent !important;
-			}
+.lifewiki-ai-panel {
+	height: 100%;
+	display: flex;
+	flex-direction: column;
+	background: var(--surface-container-low);
+	overflow: hidden;
+	position: relative;
+}
 
-			/* Empty State - Remove white rectangle */
-			.lifewiki-empty-state {
-				background: transparent !important;
-				border: none !important;
-				border-radius: 0 !important;
-				box-shadow: none !important;
-				padding: 24px !important;
-			}
+.lifewiki-ai-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 20px;
+	flex-shrink: 0;
+	background: rgba(255, 255, 255, 0.85);
+	backdrop-filter: blur(16px);
+	border-bottom: 1px solid rgba(204, 195, 214, 0.15);
+}
+
+.lifewiki-ai-header-title {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.lifewiki-ai-header-title span {
+	font-family: var(--font-body);
+	font-size: 14px;
+	font-weight: 600;
+	color: var(--primary);
+	letter-spacing: 0.02em;
+}
+
+.lifewiki-ai-header-subtitle {
+	font-family: var(--font-body);
+	font-size: 12px;
+	color: var(--on-surface-variant);
+}
+
+.lifewiki-ai-header-actions {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+}
+
+.lifewiki-ai-clear-btn {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 28px;
+	height: 28px;
+	border-radius: 8px;
+	border: none;
+	background: transparent;
+	color: var(--on-surface-variant);
+	cursor: pointer;
+	transition: background 0.15s, color 0.15s;
+}
+
+.lifewiki-ai-clear-btn:hover {
+	background: var(--surface-container-high);
+	color: var(--primary);
+}
+
+.lifewiki-ai-scroll {
+	flex: 1 1 0;
+	overflow-y: auto;
+	overflow-x: hidden;
+	padding: 16px;
+	display: flex;
+	flex-direction: column;
+	background: transparent !important;
+}
+
+.lifewiki-ai-scroll::-webkit-scrollbar {
+	width: 6px;
+}
+
+.lifewiki-ai-scroll::-webkit-scrollbar-track {
+	background: transparent;
+}
+
+.lifewiki-ai-scroll::-webkit-scrollbar-thumb {
+	background: rgba(204, 195, 214, 0.4);
+	border-radius: 3px;
+}
+
+.lifewiki-ai-scroll::-webkit-scrollbar-thumb:hover {
+	background: rgba(204, 195, 214, 0.6);
+}
+
+.lifewiki-empty-state {
+	display: none !important;
+	height: 100% !important;
+	text-align: center !important;
+	padding: 0 !important;
+	background: transparent !important;
+	box-shadow: none !important;
+	border: none !important;
+	border-radius: 0 !important;
+	outline: none !important;
+}
+
+.lifewiki-empty-state.visible {
+	display: block !important;
+}
+
+.lifewiki-empty-state-title {
+	font-family: var(--font-body) !important;
+	font-size: 13px !important;
+	color: var(--on-surface-variant) !important;
+	opacity: 0.5 !important;
+	background: transparent !important;
+	padding: 0 !important;
+	border: none !important;
+	box-shadow: none !important;
+}
+
+.lifewiki-chat-messages {
+	display: none;
+	flex-direction: column;
+	gap: 16px;
+	padding-bottom: 16px;
+	background: transparent;
+}
+
+.lifewiki-chat-messages.visible {
+	display: flex;
+	background: transparent;
+}
+
+.lifewiki-chat-msg {
+	padding: 12px 16px;
+	border-radius: 12px;
+	font-family: var(--font-body);
+	font-size: 14px;
+	line-height: 1.6;
+	word-wrap: break-word;
+	overflow-wrap: break-word;
+	animation: messageFadeIn 0.2s ease-out;
+	user-select: text;
+	position: relative;
+	max-width: 80%;
+}
+
+@keyframes messageFadeIn {
+	from { opacity: 0; transform: translateY(4px); }
+	to { opacity: 1; transform: translateY(0); }
+}
+
+.lifewiki-chat-msg.assistant {
+	align-self: flex-start;
+	background: var(--surface-container-lowest);
+	color: var(--on-surface);
+	border-radius: 12px;
+	border: 1px solid rgba(204, 195, 214, 0.15);
+	box-shadow: 0 4px 20px -4px rgba(26, 28, 28, 0.04);
+}
+
+.lifewiki-chat-msg.user {
+	align-self: flex-end;
+	background: var(--surface-container-high);
+	color: var(--on-surface);
+	border-radius: 12px;
+	border: 1px solid rgba(204, 195, 214, 0.15);
+}
+
+.lifewiki-chat-msg strong {
+	color: var(--primary);
+	font-weight: 600;
+}
+
+.lifewiki-chat-msg-copy-hint {
+	position: absolute;
+	top: 8px;
+	right: 10px;
+	font-size: 10px;
+	color: var(--on-surface-variant);
+	opacity: 0;
+	transition: opacity 0.15s;
+}
+
+.lifewiki-chat-msg.assistant:hover .lifewiki-chat-msg-copy-hint {
+	opacity: 1;
+}
+
+.lifewiki-thinking {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 12px 16px;
+	background: var(--surface-container-lowest);
+	border-radius: 12px;
+	border-top-left-radius: 4px;
+	border: 1px solid rgba(204, 195, 214, 0.15);
+	box-shadow: 0 4px 20px -4px rgba(26, 28, 28, 0.04);
+	animation: messageFadeIn 0.2s ease-out;
+}
+
+.lifewiki-thinking-dots {
+	display: flex;
+	gap: 6px;
+}
+
+.lifewiki-thinking-dot {
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	background: var(--on-surface-variant);
+	animation: thinkingPulse 1.2s ease-in-out infinite;
+}
+
+.lifewiki-thinking-dot:nth-child(2) { animation-delay: 0.15s; }
+.lifewiki-thinking-dot:nth-child(3) { animation-delay: 0.3s; }
+
+@keyframes thinkingPulse {
+	0%, 100% { transform: scale(0.8); opacity: 0.5; }
+	50% { transform: scale(1); opacity: 1; }
+}
+
+.lifewiki-ai-input-area {
+	position: absolute;
+	bottom: 52px;
+	left: 16px;
+	right: 16px;
+	z-index: 20;
+	padding: 0;
+}
+
+.lifewiki-chat-input-wrapper {
+	background: var(--surface-container-lowest);
+	border-radius: 16px;
+	padding: 16px;
+	box-shadow: 0 10px 40px -10px rgba(26, 28, 28, 0.06);
+	border: 1px solid rgba(204, 195, 214, 0.15);
+	display: flex;
+	flex-direction: column;
+	min-height: 120px;
+}
+
+.lifewiki-chat-input-wrapper:focus-within {
+	border-color: rgba(204, 195, 214, 0.15);
+	box-shadow: 0 10px 40px -10px rgba(26, 28, 28, 0.06);
+}
+
+.lifewiki-input-row {
+	display: flex;
+	align-items: flex-end;
+	gap: 8px;
+	flex: 1;
+	min-height: 80px;
+}
+
+.lifewiki-input-textarea {
+	flex: 1;
+	min-height: 80px;
+	max-height: 200px;
+	resize: none;
+	border: none !important;
+	padding: 0;
+	font-family: var(--font-body);
+	font-size: 14px;
+	line-height: 1.6;
+	background: transparent;
+	color: var(--on-surface);
+	outline: none !important;
+	box-shadow: none !important;
+	overflow-y: auto;
+}
+
+.lifewiki-input-textarea:focus {
+	border: none !important;
+	outline: none !important;
+	box-shadow: none !important;
+}
+
+.lifewiki-input-textarea::placeholder {
+	color: var(--on-surface-variant);
+	opacity: 0.6;
+}
+
+.lifewiki-send-btn {
+	display: flex !important;
+	align-items: center !important;
+	justify-content: center !important;
+	width: 36px !important;
+	height: 36px !important;
+	border: 1px solid var(--surface-container-high) !important;
+	border-radius: 50% !important;
+	background: var(--surface-container-high) !important;
+	color: var(--on-surface-variant) !important;
+	cursor: pointer;
+	transition: background-color 0.2s, transform 0.2s;
+	flex-shrink: 0;
+	margin-bottom: 2px;
+}
+
+.lifewiki-send-btn:hover {
+	transform: translateY(-1px);
+}
+
+.lifewiki-send-btn.active {
+	background: #5c28b8 !important;
+	color: #ffffff !important;
+}
+
+.lifewiki-chat-input-wrapper:focus-within .lifewiki-send-btn {
+	background: #5c28b8 !important;
+	color: #ffffff !important;
+}
+
+.lifewiki-model-select {
+	background: transparent;
+	border: none;
+	color: var(--on-surface-variant);
+	font-family: var(--font-body);
+	font-size: 10px;
+	font-weight: 500;
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+	cursor: pointer;
+	outline: none;
+	padding: 0;
+}
+
+.lifewiki-model-select:hover {
+	color: var(--primary);
+}
+
+.lifewiki-entity-confirm {
+	background: var(--surface-container-lowest);
+	border: 1px solid rgba(204, 195, 214, 0.15);
+	border-radius: 12px;
+	padding: 16px;
+	margin: 8px 0;
+	animation: messageFadeIn 0.2s ease-out;
+	box-shadow: 0 4px 20px -4px rgba(26, 28, 28, 0.04);
+}
+
+.lifewiki-entity-confirm-title {
+	font-family: var(--font-body);
+	font-size: 14px;
+	font-weight: 500;
+	color: var(--on-surface);
+	margin-bottom: 6px;
+}
+
+.lifewiki-entity-confirm-reason {
+	font-family: var(--font-body);
+	font-size: 12px;
+	color: var(--on-surface-variant);
+	margin-bottom: 12px;
+	line-height: 1.5;
+}
+
+.lifewiki-entity-confirm-buttons {
+	display: flex;
+	gap: 8px;
+}
+
+.lifewiki-entity-confirm-btn {
+	flex: 1;
+	padding: 8px 14px;
+	border-radius: 8px;
+	border: none;
+	font-family: var(--font-body);
+	font-size: 12px;
+	font-weight: 500;
+	cursor: pointer;
+	transition: all 0.15s;
+}
+
+.lifewiki-entity-confirm-btn.archive {
+	background: linear-gradient(135deg, var(--primary) 0%, var(--primary-container) 100%);
+	color: var(--on-primary);
+}
+
+.lifewiki-entity-confirm-btn.archive:hover {
+	transform: translateY(-1px);
+	box-shadow: 0 4px 12px -2px rgba(92, 40, 184, 0.25);
+}
+
+.lifewiki-entity-confirm-btn.skip {
+	background: transparent;
+	border: 1px solid rgba(204, 195, 214, 0.3);
+	color: var(--on-surface-variant);
+}
+
+.lifewiki-entity-confirm-btn.skip:hover {
+	border-color: var(--primary);
+	color: var(--primary);
+}
+
+@media (max-width: 400px) {
+	.lifewiki-chat-msg {
+		max-width: 92%;
+	}
+}
 		`;
 		this.containerEl.appendChild(styleEl);
 	}

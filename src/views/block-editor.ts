@@ -12,6 +12,7 @@
 import { ItemView, WorkspaceLeaf, TFile, TFolder, setIcon } from 'obsidian';
 import type LifeWikiPlugin from '../main';
 import { Block } from '../entities/types';
+import { loadTemplate } from '../utils/template-loader';
 
 export const VIEW_TYPE_BLOCK_EDITOR = 'lifewiki-block-editor';
 
@@ -830,20 +831,6 @@ export class BlockEditorView extends ItemView {
 				color: var(--on-surface);
 			}
 
-			/* Empty State */
-			.lifewiki-empty-state {
-				text-align: center;
-				padding: 64px 48px;
-				color: var(--on-surface-variant);
-				font-size: 14px;
-				line-height: 1.7;
-				font-family: var(--font-body);
-				background: var(--surface-container-lowest);
-				border-radius: 16px;
-				border: 1px solid rgba(204, 195, 214, 0.15);
-				box-shadow: 0 10px 40px -10px rgba(26, 28, 28, 0.06);
-			}
-
 			/* Child Input Area */
 			.lifewiki-child-input-area {
 				margin-top: 12px;
@@ -1074,23 +1061,27 @@ export class BlockEditorView extends ItemView {
 		let currentBlock: ParsedBlock | null = null;
 		let currentContentLines: string[] = [];
 		let currentChildren: ChildBlock[] = [];
+		let pendingBlockId: string | null = null; // Block ID found on separate line after content
 
 		for (const line of lines) {
-			// Match H3 header: ### HH:mm [source] #category <!-- blockId -->
-			const headerMatch = line.match(/^### (\d{2}:\d{2}) \[([^\]]+)\] #(\S+)(?: <!-- ([a-f0-9-]+) -->)?/);
-
+			// Match H3 header: ### HH:mm [source] #category
+			const headerMatch = line.match(/^### (\d{2}:\d{2}) \[([^\]]+)\] #(\S+)/);
 			if (headerMatch) {
 				// Save previous block if exists
 				if (currentBlock) {
+					// Use pending block ID if found (from line after content)
+					if (pendingBlockId) {
+						currentBlock.id = pendingBlockId;
+					}
 					currentBlock.content = currentContentLines.join('\n').trim();
 					currentBlock.children = [...currentChildren];
 					this.blocks.push(currentBlock);
+					pendingBlockId = null;
 				}
 
-				// Use embedded blockId if present, otherwise generate stable ID
-				const blockId = headerMatch[4] || stableId(headerMatch[0]);
+				// Generate stable ID as default (will be overridden if pendingBlockId found later)
 				currentBlock = {
-					id: blockId,
+					id: stableId(headerMatch[0]),
 					timestamp: headerMatch[1],
 					source: headerMatch[2],
 					category: headerMatch[3],
@@ -1101,16 +1092,38 @@ export class BlockEditorView extends ItemView {
 				currentContentLines = [];
 				currentChildren = [];
 			}
+			// Check if this line is ONLY a block ID marker (comes after content on its own line)
+			// ONLY matches if the line is EXACTLY the block ID marker (no other content)
+			if (currentBlock && !pendingBlockId) {
+				const trimmed = line.trim();
+				// Match HTML comment block ID ONLY if it's the entire line: <!-- blockId -->
+				const htmlCommentMatch = trimmed.match(/^<!-- ([a-f0-9-]+) -->$/);
+				if (htmlCommentMatch) {
+					pendingBlockId = htmlCommentMatch[1];
+					continue; // Skip adding this as content
+				}
+
+				// Match <sub> block ID ONLY if it's the entire line with no other content
+				// Format: <sub>blockId</sub> or <sub style="...">blockId</sub>
+				const subOnlyMatch = trimmed.match(/^<sub[^>]*>([a-f0-9-]+)<\/sub>$/i);
+				if (subOnlyMatch) {
+					pendingBlockId = subOnlyMatch[1];
+					continue;
+				}
+			}
 			// Child block: starts with "- HH:mm " or "- content"
 			// Format: - HH:mm content <!-- childId -->
-			else if (line.startsWith('- ') && currentBlock) {
+			if (line.startsWith('- ') && currentBlock) {
 				// Extract child content and optional ID
 				// Regex: - (HH:mm)? ?(content)? ?(?: <!-- ([a-f0-9-]+) -->)?
-				const childMatch = line.match(/^- (\d{2}:\d{2})?\s*(.+?)?\s*(?:<!-- ([a-f0-9-]+) -->)?$/);
+				const childMatch = line.match(/^- (\d{2}:\d{2})?\s+(.+?)\s*(?:<!-- ([a-f0-9-]+) -->)?$/);
 				if (childMatch) {
 					const childTimestamp = childMatch[1] || '';
 					// Strip HTML comments from child content
-					const childContent = (childMatch[2] || '').replace(/<!--[\s\S]*?-->/g, '').trim();
+					const childContent = (childMatch[2] || '')
+					.replace(/<!--[\s\S]*?-->/g, '')  // HTML comments
+					.replace(/<sub[^>]*>[\s\S]*?<\/sub>/gi, '')  // <sub> tags
+					.trim();
 					const childId = childMatch[3] || stableId(line);
 
 					if (childContent) {
@@ -1123,7 +1136,10 @@ export class BlockEditorView extends ItemView {
 					}
 				} else {
 					// Fallback for simple format without ID - also strip HTML comments
-					const childContent = line.substring(2).replace(/<!--[\s\S]*?-->/g, '').trim();
+					const childContent = line.substring(2)
+						.replace(/<!--[\s\S]*?-->/g, '')  // HTML comments
+						.replace(/<sub[^>]*>[\s\S]*?<\/sub>/gi, '')  // <sub> tags
+						.trim();
 					if (childContent) {
 						currentChildren.push({
 							id: stableId(line),
@@ -1135,9 +1151,12 @@ export class BlockEditorView extends ItemView {
 				}
 			}
 			// Content line (not empty, not a header, not blockquote)
-			else if (line.trim() && currentBlock && !line.startsWith('#') && !line.startsWith('>')) {
-				// Strip HTML comments from content
-				const cleanLine = line.trim().replace(/<!--[\s\S]*?-->/g, '').trim();
+			if (line.trim() && currentBlock && !line.startsWith('#') && !line.startsWith('>')) {
+				// Strip HTML comments and <sub> tags (old format) from content
+				const cleanLine = line.trim()
+					.replace(/<!--[\s\S]*?-->/g, '')  // HTML comments
+					.replace(/<sub[^>]*>[\s\S]*?<\/sub>/gi, '')  // <sub> tags (old block ID format)
+					.trim();
 				if (cleanLine) {
 					currentContentLines.push(cleanLine);
 				}
@@ -1146,6 +1165,10 @@ export class BlockEditorView extends ItemView {
 
 		// Don't forget the last block
 		if (currentBlock) {
+			// Use pending block ID if found
+			if (pendingBlockId) {
+				currentBlock.id = pendingBlockId;
+			}
 			currentBlock.content = currentContentLines.join('\n').trim();
 			currentBlock.children = currentChildren;
 			this.blocks.push(currentBlock);
@@ -1746,7 +1769,7 @@ export class BlockEditorView extends ItemView {
 		const childTimestamp = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
 		const childId = uuid();
 
-		// Format: - HH:mm content <!-- childId -->
+		// Format: - HH:mm content (block ID as HTML comment, invisible in render)
 		const childLine = `- ${childTimestamp} ${childContent} <!-- ${childId} -->`;
 
 		// Insert the child line
@@ -1806,8 +1829,8 @@ export class BlockEditorView extends ItemView {
 
 		if (blockLineIndex === -1) return;
 
-		// Rebuild the block header with blockId
-		const newHeader = `### ${block.timestamp} [${block.source}] #${block.category} <!-- ${block.id} -->`;
+		// Rebuild the block header (block ID is kept at end of content)
+		const newHeader = `### ${block.timestamp} [${block.source}] #${block.category}`;
 		lines[blockLineIndex] = newHeader;
 
 		// Update content lines (after header, until next ### or child)
@@ -1895,14 +1918,20 @@ export class BlockEditorView extends ItemView {
 
 		if (!(file instanceof TFile)) {
 			// Create new file with template header
-			const templateContent = `# ${this.currentDate}\n> [!NOTE] 日记是AI时代人生最大的复利\n\n## Flow of Today：\n`;
-			const newContent = templateContent + `\n### ${block.timestamp} [${block.source}] #${block.category}\n${block.content}`;
+			const templateContent = await loadTemplate(
+				this.app.vault,
+				'journal-template.md',
+				{
+					date: this.currentDate
+				}
+			);
+			const newContent = templateContent + `\n### ${block.timestamp} [${block.source}] #${block.category}\n${block.content}\n<!-- ${block.id} -->\n`;
 			await this.app.vault.create(dailyPath, newContent);
 			return;
 		}
 
-		// Build block text with block ID embedded as HTML comment
-		const blockText = `\n### ${block.timestamp} [${block.source}] #${block.category} <!-- ${block.id} -->\n${block.content}`;
+		// Build block text with block ID as HTML comment (invisible in rendered view)
+		const blockText = `\n### ${block.timestamp} [${block.source}] #${block.category}\n${block.content}\n<!-- ${block.id} -->\n`;
 
 		const existing = await this.app.vault.read(file);
 		await this.app.vault.modify(file, existing + blockText);
@@ -1918,19 +1947,14 @@ export class BlockEditorView extends ItemView {
 		// For child blocks, use parent's session
 		const effectiveParentId = (block as any).parentId || null;
 
-		console.log('[BlockEditor] startAIAnalysis for block:', block.id, 'parentId:', effectiveParentId);
-
 		// For child blocks, always trigger new AI analysis (skip history check)
 		// For parent blocks, check if session already has history
 		if (!effectiveParentId) {
 			const existingSession = sessionManager.getSession(block.id, effectiveParentId);
-			console.log('[BlockEditor] existingSession:', existingSession ? `messages=${existingSession.messages.length}` : 'null');
 			const hasHistory = existingSession && existingSession.messages && existingSession.messages.length > 0;
-			console.log('[BlockEditor] hasHistory:', hasHistory);
 
 			if (hasHistory) {
 				// Load existing session in AI panel AND enter append mode
-				console.log('[BlockEditor] Loading existing session for block:', block.id);
 				this.selectBlock(block.id); // Enter append mode
 				if (aiView) {
 					aiView.setActiveBlock(block.id, block.content);
@@ -1962,14 +1986,10 @@ export class BlockEditorView extends ItemView {
 			// Use LangGraph agent
 			const agent = this.plugin.getLangGraphAgent();
 			if (agent) {
-				console.log('[BlockEditor] Using LangGraph agent');
 				result = await agent.startBlockAnalysis(block.id, block.content, effectiveParentId, siblingBlocks);
 			} else {
-				console.error('[BlockEditor] No AI agent available');
 				throw new Error('AI agent not available');
 			}
-
-			console.log('[BlockEditor] AI result:', JSON.stringify(result));
 
 			// Notify AI panel - use parent's content if child block
 			if (aiView) {
@@ -1982,14 +2002,12 @@ export class BlockEditorView extends ItemView {
 			// Update block category based on AI analysis result (only for parent blocks with initial placeholder)
 			if (!effectiveParentId && (block as ParsedBlock).category === '待分析' && result.areas && result.areas.length > 0) {
 				const newCategory = result.areas[0];
-				console.log('[BlockEditor] Updating block category from', (block as ParsedBlock).category, 'to', newCategory);
 				(block as ParsedBlock).category = newCategory;
 				await this.saveBlockToFile(block as ParsedBlock);
 				// Refresh the view to show updated category tag
 				this.renderBlocks();
 			}
 		} catch (error) {
-			console.error('[BlockEditor] AI analysis failed:', error);
 			// Show error in AI panel
 			if (aiView) {
 				const displayContent = effectiveParentId
@@ -2010,13 +2028,11 @@ export class BlockEditorView extends ItemView {
 
 			if (analysisResult.areas && analysisResult.areas.length > 0) {
 				const newCategory = analysisResult.areas[0];
-				console.log('[BlockEditor] Updating block category from', block.category, 'to', newCategory);
-
 				block.category = newCategory;
 				await this.saveBlockToFile(block);
 			}
 		} catch (error) {
-			console.error('[BlockEditor] Failed to update block category:', error);
+			// Silent fail for category update
 		}
 	}
 
