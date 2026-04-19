@@ -15,7 +15,6 @@ NC='\033[0m' # No Color
 # 默认配置
 PLUGIN_NAME="lifewiki"
 DEFAULT_VAULT_PATH="$HOME/lifewiki-vault"
-OBSIDIAN_PLUGINS_DIR="$HOME/Library/Application Support/obsidian/plugins"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # 解析参数
@@ -70,12 +69,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 # 设置默认值
-if [ -n "$VAULT_PATH" ] && [ -n "$VAULT_NAME" ]; then
-    log_error "不能同时使用 -d 和 -v 参数"
-    usage
-fi
-
-if [ -z "$VAULT_PATH" ] && [ -z "$VAULT_NAME" ]; then
+if [ -z "$VAULT_PATH" ]; then
     VAULT_PATH="$DEFAULT_VAULT_PATH"
 fi
 
@@ -105,7 +99,7 @@ check_system() {
 
 # 询问用户 vault 路径
 ask_vault_path() {
-    if [ -n "$VAULT_PATH" ] || [ -n "$VAULT_NAME" ]; then
+    if [ -n "$VAULT_PATH" ]; then
         # 命令行已指定，使用命令行参数
         return 0
     fi
@@ -315,7 +309,8 @@ EOF
 install_plugin() {
     log_info "安装 LifeWiki 插件..."
 
-    PLUGIN_DIR="${OBSIDIAN_PLUGINS_DIR}/${PLUGIN_NAME}"
+    # 安装到 vault 的 .obsidian/plugins 目录
+    PLUGIN_DIR="${VAULT_PATH}/.obsidian/plugins/${PLUGIN_NAME}"
 
     # 创建插件目录
     mkdir -p "$PLUGIN_DIR"
@@ -350,24 +345,16 @@ install_plugin() {
 
 # 启用插件
 enable_plugin() {
-    log_info "检查插件安装状态..."
+    log_info "插件已安装到 vault"
 
-    # 检查插件是否已在 Obsidian 中注册
-    # 注意: 这个步骤需要用户手动在 Obsidian 中操作，或通过配置文件自动启用
+    PLUGIN_DIR="${VAULT_PATH}/.obsidian/plugins/${PLUGIN_NAME}"
 
-    PLUGIN_DIR="${OBSIDIAN_PLUGINS_DIR}/${PLUGIN_NAME}"
-
-    # 创建 community-plugin-config.json 来自动启用插件
-    COMMUNITY_PLUGINS_CONFIG="$HOME/Library/Application Support/obsidian/community-plugin-config.json"
-
-    if [ -f "$COMMUNITY_PLUGINS_CONFIG" ]; then
-        log_info "更新社区插件配置..."
-        # 简单处理: 添加插件 ID 到已启用的列表
-        # 注意: 实际配置是 JSON 格式，需要更复杂的处理
-        log_warn "请在 Obsidian 中手动启用插件: 设置 → 社区插件 → 启用 LifeWiki"
-    else
-        log_warn "请在 Obsidian 中手动启用插件: 设置 → 社区插件 → 启用 LifeWiki"
+    if [ -d "$PLUGIN_DIR" ]; then
+        log_info "插件目录: ${PLUGIN_DIR}"
     fi
+
+    # 提示用户手动启用
+    log_warn "请在 Obsidian 中启用插件: 设置 → 社区插件 → 启用 LifeWiki"
 }
 
 # 打开 Obsidian
