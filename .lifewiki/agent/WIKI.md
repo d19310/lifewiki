@@ -11,9 +11,9 @@ Vault/
 │   ├── 张三.md
 │   └── 李四.md
 ├── Projects/                   # 项目和任务
-│   ├── 青岛移动B300项目.md
-│   ├── 公共算力平台运营项目.md
-│   └── 公共算力平台运营任务.md
+│   ├── 某项目.md
+│   ├── 某运营项目.md
+│   └── 某运营任务.md
 ├── Things/                     # 物品/工具
 │   └── Hermes Agent.md
 ├── Ideas/                      # 想法/观点
@@ -26,9 +26,9 @@ Vault/
 
 | 类型 | 命名规范 | 示例 |
 |------|---------|------|
-| 人脉 | 姓名.md | 顾伟乐.md |
-| 项目 | XXXX项目.md | 青岛移动B300项目.md |
-| 任务 | XXXX任务.md | 公共算力平台运营任务.md |
+| 人脉 | 姓名.md | 王五.md |
+| 项目 | XXXX项目.md | 某项目.md |
+| 任务 | XXXX任务.md | 某任务.md |
 | 物品 | 名称.md | Hermes Agent.md |
 | 想法 | 名称.md | 跨平台记忆方案.md |
 | 知识 | 名称.md | Hermes Agent文档.md |
@@ -41,8 +41,8 @@ Vault/
 
 ```markdown
 ## 关联实体
-- [[顾伟乐]] - 项目负责人
-- [[公共算力平台运营项目]] - 所属项目
+- [[王五]] - 项目负责人
+- [[某运营项目]] - 所属项目
 - [[张三]] - 团队成员
 ```
 
@@ -51,11 +51,11 @@ Vault/
 ```yaml
 related_entities:
   - entity_id: "xxx"
-    name: "顾伟乐"
+    name: "王五"
     relation: "负责人"
-    context: "青岛移动B300项目对接人"
+    context: "某项目对接人"
   - entity_id: "yyy"
-    name: "公共算力平台运营项目"
+    name: "某运营项目"
     relation: "所属项目"
     context: "张三是该项目负责人"
 ```
