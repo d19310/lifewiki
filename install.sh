@@ -280,6 +280,11 @@ create_vault() {
     mkdir -p "${VAULT_PATH}/Things"
     mkdir -p "${VAULT_PATH}/Ideas"
     mkdir -p "${VAULT_PATH}/Knowledge"
+    mkdir -p "${VAULT_PATH}/templates"
+
+    # 复制模板文件
+    cp "${SCRIPT_DIR}/templates/"*.md "${VAULT_PATH}/templates/" 2>/dev/null || true
+    log_info "复制模板文件到: ${VAULT_PATH}/templates/"
 
     # 创建 .obsidian 配置目录
     mkdir -p "${VAULT_PATH}/.obsidian"
