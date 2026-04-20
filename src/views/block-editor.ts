@@ -16,8 +16,8 @@ import { loadTemplate } from '../utils/template-loader';
 
 export const VIEW_TYPE_BLOCK_EDITOR = 'lifewiki-block-editor';
 
-// Diary file path -日记存储在 Vault 根目录的 日记文件夹
-const DIARY_FOLDER = '日记';
+// Diary file path - 日记存储在 Vault 根目录的 Daily 文件夹
+const DIARY_FOLDER = 'Daily';
 
 function uuid(): string {
 	return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
@@ -974,8 +974,12 @@ export class BlockEditorView extends ItemView {
 		});
 		setIcon(arrowBtn, 'arrow-up');
 
-		// Focus handler - scroll to last block
+		// Focus handler - scroll to last block and switch to analysis mode
 		this.inputTextarea.addEventListener('focus', () => {
+			// Switch to analysis mode when focusing on diary input
+			const aiView = this.plugin.getAIAnalysisView();
+			aiView?.setMode('analysis');
+
 			// Only scroll to last block when NOT in append mode
 			if (!this.isAppendMode) {
 				this.scrollToLastBlock();
@@ -1451,6 +1455,7 @@ export class BlockEditorView extends ItemView {
 			this.selectedBlockContent = block.content;
 			const aiView = this.plugin.getAIAnalysisView();
 			if (aiView) {
+				aiView.setMode('analysis');
 				aiView.setActiveBlock(blockId, block.content);
 			}
 		}
@@ -1483,6 +1488,7 @@ export class BlockEditorView extends ItemView {
 			this.selectedBlockContent = parentBlock.content;
 			const aiView = this.plugin.getAIAnalysisView();
 			if (aiView) {
+				aiView.setMode('analysis');
 				// Pass parentId so AI panel knows to load parent's session
 				aiView.setActiveBlock(childId, parentBlock.content, parentId);
 			}
@@ -1967,6 +1973,7 @@ export class BlockEditorView extends ItemView {
 				// Load existing session in AI panel AND enter append mode
 				this.selectBlock(block.id); // Enter append mode
 				if (aiView) {
+					aiView.setMode('analysis');
 					aiView.setActiveBlock(block.id, block.content);
 				}
 				return;

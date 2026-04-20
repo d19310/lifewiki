@@ -4,8 +4,28 @@
  */
 
 import { z } from 'zod';
+import type { App, TFile } from 'obsidian';
 import type { EntityManager } from '../../../entities/manager';
 import type { ToolExecutionResult } from '../types';
+
+const DIARY_FOLDER = 'Daily';
+
+// Vault tool input schemas
+export const SearchVaultInputSchema = z.object({
+	query: z.string().describe('Search query to find in vault documents')
+});
+
+export const ReadDocumentInputSchema = z.object({
+	path: z.string().describe('Path to the document to read')
+});
+
+export const GetRelatedEntitiesInputSchema = z.object({
+	entityId: z.string().describe('Entity ID to get related entities for')
+});
+
+export type SearchVaultInput = z.infer<typeof SearchVaultInputSchema>;
+export type ReadDocumentInput = z.infer<typeof ReadDocumentInputSchema>;
+export type GetRelatedEntitiesInput = z.infer<typeof GetRelatedEntitiesInputSchema>;
 
 // Tool input schemas (matching SKILL.md)
 export const SearchEntityInputSchema = z.object({
@@ -46,6 +66,12 @@ export const GetEntityHistoryInputSchema = z.object({
 	entityId: z.string().describe('Entity ID')
 });
 
+export const GetDiaryEntriesInputSchema = z.object({
+	startDate: z.string().describe('Start date in YYYY-MM-DD format'),
+	endDate: z.string().describe('End date in YYYY-MM-DD format'),
+	query: z.string().optional().describe('Optional search query to filter diary entries')
+});
+
 export type SearchEntityInput = z.infer<typeof SearchEntityInputSchema>;
 export type CreateEntityInput = z.infer<typeof CreateEntityInputSchema>;
 export type UpdateEntityInput = z.infer<typeof UpdateEntityInputSchema>;
@@ -53,6 +79,7 @@ export type AddInteractionInput = z.infer<typeof AddInteractionInputSchema>;
 export type LinkEntitiesInput = z.infer<typeof LinkEntitiesInputSchema>;
 export type ListEntitiesInput = z.infer<typeof ListEntitiesInputSchema>;
 export type GetEntityHistoryInput = z.infer<typeof GetEntityHistoryInputSchema>;
+export type GetDiaryEntriesInput = z.infer<typeof GetDiaryEntriesInputSchema>;
 
 /**
  * Tool implementation functions
@@ -60,7 +87,8 @@ export type GetEntityHistoryInput = z.infer<typeof GetEntityHistoryInputSchema>;
 export class EntityTools {
 	constructor(
 		private entityManager: EntityManager,
-		private blockId: string
+		private blockId: string,
+		private app?: App
 	) {}
 
 	/**
@@ -287,6 +315,193 @@ export class EntityTools {
 			return { success: false, error: 'Entity not found' };
 		} catch (error) {
 			return { success: false, error: `Get history failed: ${(error as Error).message}` };
+		}
+	}
+
+	/**
+	 * Get diary entries by date range
+	 * Used in chat mode to allow AI to read diary entries for summarization/reflection
+	 */
+	async getDiaryEntries(input: GetDiaryEntriesInput): Promise<ToolExecutionResult> {
+		try {
+			if (!this.app) {
+				return { success: false, error: 'Diary access not available' };
+			}
+
+			const diaryFiles = this.app.vault.getMarkdownFiles()
+				.filter(f => f.path.startsWith(DIARY_FOLDER + '/'));
+
+			// Filter by date range (fileName format: YYYY-MM-DD.md)
+			const filteredFiles = diaryFiles.filter(f => {
+				const fileName = f.name.replace('.md', '');
+				return fileName >= input.startDate && fileName <= input.endDate;
+			});
+
+			const entries: Array<{ date: string; content: string }> = [];
+			for (const file of filteredFiles) {
+				try {
+					const content = await this.app.vault.read(file);
+					const date = file.name.replace('.md', '');
+
+					// If query is provided, filter by content match
+					if (input.query) {
+						if (content.toLowerCase().includes(input.query.toLowerCase())) {
+							entries.push({ date, content });
+						}
+					} else {
+						entries.push({ date, content });
+					}
+				} catch (e) {
+					// Skip files that can't be read
+				}
+			}
+
+			// Sort by date descending (most recent first)
+			entries.sort((a, b) => b.date.localeCompare(a.date));
+
+			return {
+				success: true,
+				data: {
+					entries,
+					total: entries.length
+				}
+			};
+		} catch (error) {
+			return { success: false, error: `Get diary entries failed: ${(error as Error).message}` };
+		}
+	}
+
+	/**
+	 * Search vault documents by content query
+	 * Used in chat mode for full-text search across all vault documents
+	 */
+	async searchVault(input: SearchVaultInput): Promise<ToolExecutionResult> {
+		try {
+			if (!this.app) {
+				return { success: false, error: 'Vault access not available' };
+			}
+
+			const files = this.app.vault.getMarkdownFiles();
+			const results: Array<{ path: string; snippet: string }> = [];
+			const queryLower = input.query.toLowerCase();
+
+			for (const file of files) {
+				try {
+					const content = await this.app.vault.read(file);
+					const contentLower = content.toLowerCase();
+					const index = contentLower.indexOf(queryLower);
+
+					if (index !== -1) {
+						// Extract snippet around the match
+						const start = Math.max(0, index - 50);
+						const end = Math.min(content.length, index + input.query.length + 100);
+						let snippet = content.substring(start, end);
+						if (start > 0) snippet = '...' + snippet;
+						if (end < content.length) snippet = snippet + '...';
+
+						results.push({
+							path: file.path,
+							snippet: snippet.replace(/\n/g, ' ')
+						});
+					}
+				} catch {
+					// Skip files that can't be read
+				}
+			}
+
+			// Sort by relevance (match position)
+			results.sort((a, b) => a.snippet.indexOf(input.query) - b.snippet.indexOf(input.query));
+
+			return {
+				success: true,
+				data: {
+					files: results.slice(0, 20), // Limit to top 20 results
+					total: results.length
+				}
+			};
+		} catch (error) {
+			return { success: false, error: `Search vault failed: ${(error as Error).message}` };
+		}
+	}
+
+	/**
+	 * Read a document by path
+	 * Used in chat mode to read full content of a specific document
+	 */
+	async readDocument(input: ReadDocumentInput): Promise<ToolExecutionResult> {
+		try {
+			if (!this.app) {
+				return { success: false, error: 'Vault access not available' };
+			}
+
+			const file = this.app.vault.getAbstractFileByPath(input.path);
+
+			if (!file || !(file instanceof Object)) {
+				return { success: false, error: 'Document not found' };
+			}
+
+			const content = await this.app.vault.read(file as any);
+			const cache = this.app.metadataCache.getFileCache(file as any);
+			const frontmatter = cache?.frontmatter || {};
+
+			return {
+				success: true,
+				data: {
+					path: input.path,
+					content,
+					frontmatter
+				}
+			};
+		} catch (error) {
+			return { success: false, error: `Read document failed: ${(error as Error).message}` };
+		}
+	}
+
+	/**
+	 * Get related entities for an entity
+	 * Used in chat mode to explore entity relationships
+	 */
+	async getRelatedEntitiesFromVault(input: GetRelatedEntitiesInput): Promise<ToolExecutionResult> {
+		try {
+			const entity = this.entityManager.getEntity(input.entityId);
+
+			if (!entity) {
+				return { success: false, error: 'Entity not found' };
+			}
+
+			const related = [];
+
+			// Get related entities from entity's relatedEntities field
+			if (entity.relatedEntities && entity.relatedEntities.length > 0) {
+				for (const rel of entity.relatedEntities) {
+					const relatedEntity = this.entityManager.getEntity(rel.entityId || rel.id);
+					if (relatedEntity) {
+						related.push({
+							entity: {
+								id: relatedEntity.id,
+								name: relatedEntity.title,
+								type: relatedEntity.type
+							},
+							relation: rel.relation,
+							context: rel.context || ''
+						});
+					}
+				}
+			}
+
+			return {
+				success: true,
+				data: {
+					entity: {
+						id: entity.id,
+						name: entity.title,
+						type: entity.type
+					},
+					related
+				}
+			};
+		} catch (error) {
+			return { success: false, error: `Get related entities failed: ${(error as Error).message}` };
 		}
 	}
 }
