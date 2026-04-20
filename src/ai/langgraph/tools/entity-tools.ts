@@ -23,9 +23,21 @@ export const GetRelatedEntitiesInputSchema = z.object({
 	entityId: z.string().describe('Entity ID to get related entities for')
 });
 
+export const ReadLocalDocumentInputSchema = z.object({
+	path: z.string().describe('Local file path to the Markdown document (absolute path or path starting with / or ~)')
+});
+
+export const SummarizeDocumentInputSchema = z.object({
+	content: z.string().describe('Document content to summarize'),
+	entityType: z.enum(['person', 'project', 'thing', 'idea', 'knowledge']).describe('Entity type for context'),
+	title: z.string().optional().describe('Document title for context')
+});
+
 export type SearchVaultInput = z.infer<typeof SearchVaultInputSchema>;
 export type ReadDocumentInput = z.infer<typeof ReadDocumentInputSchema>;
 export type GetRelatedEntitiesInput = z.infer<typeof GetRelatedEntitiesInputSchema>;
+export type ReadLocalDocumentInput = z.infer<typeof ReadLocalDocumentInputSchema>;
+export type SummarizeDocumentInput = z.infer<typeof SummarizeDocumentInputSchema>;
 
 // Tool input schemas (matching SKILL.md)
 export const SearchEntityInputSchema = z.object({
@@ -36,7 +48,9 @@ export const CreateEntityInputSchema = z.object({
 	entityType: z.enum(['person', 'project', 'thing', 'idea', 'knowledge']).describe('Type of entity'),
 	name: z.string().describe('Entity name'),
 	summary: z.string().optional().describe('One-line summary'),
-	metadata: z.record(z.any()).optional().describe('Additional metadata')
+	metadata: z.record(z.any()).optional().describe('Additional metadata'),
+	sourceDocument: z.string().optional().describe('Local document path to archive from'),
+	sourceContent: z.string().optional().describe('Document content when archiving from local file')
 });
 
 export const UpdateEntityInputSchema = z.object({
@@ -145,6 +159,17 @@ export class EntityTools {
 	 */
 	async createEntity(input: CreateEntityInput): Promise<ToolExecutionResult> {
 		try {
+			// Build metadata with source info if provided
+			const metadata = { ...(input.metadata || {}) };
+			if (input.sourceDocument) {
+				metadata.source_path = input.sourceDocument;
+			}
+			if (input.sourceContent) {
+				metadata.description = input.sourceContent.substring(0, 500); // First 500 chars as description
+			}
+			metadata.status = metadata.status || 'active';
+			metadata.source = metadata.source || 'document_archive';
+
 			const entity = await this.entityManager.createEntity({
 				type: input.entityType,
 				title: input.name,
@@ -161,10 +186,10 @@ export class EntityTools {
 				interactions: [{
 					timestamp: new Date().toISOString(),
 					type: 'ai_analysis',
-					content: input.summary || '从日记中归档',
+					content: input.summary || '从本地文档归档',
 					sourceBlockId: this.blockId
 				}],
-				metadata: input.metadata || { status: 'active', source: 'diary' }
+				metadata
 			});
 			return {
 				success: true,
@@ -502,6 +527,160 @@ export class EntityTools {
 			};
 		} catch (error) {
 			return { success: false, error: `Get related entities failed: ${(error as Error).message}` };
+		}
+	}
+
+	/**
+	 * Read a local file from the filesystem
+	 * Used when user provides an absolute path to a .md file
+	 */
+	async readLocalDocument(input: ReadLocalDocumentInput): Promise<ToolExecutionResult> {
+		try {
+			// Path validation for security
+			if (!this.isValidLocalPath(input.path)) {
+				return { success: false, error: 'Invalid path: must be an absolute path and cannot contain ".." or "~"' };
+			}
+
+			// Expand ~ to home directory
+			let filePath = input.path;
+			if (filePath.startsWith('~/')) {
+				filePath = filePath.replace('~', process.env.HOME || '');
+			}
+
+			// Use dynamic import for Node.js fs module (browser context won't have it)
+			const fs = await import('fs/promises');
+			const pathModule = await import('path');
+
+			// Check if file exists
+			try {
+				await fs.access(filePath);
+			} catch {
+				return { success: false, error: `File not found: ${input.path}` };
+			}
+
+			// Read file content
+			const content = await fs.readFile(filePath, 'utf-8');
+
+			// Check file size (limit to 100KB)
+			const contentLength = Buffer.byteLength(content, 'utf-8');
+			if (contentLength > 100 * 1024) {
+				return { success: false, error: 'File too large: maximum size is 100KB' };
+			}
+
+			// Extract frontmatter if present
+			const frontmatter: Record<string, any> = {};
+			let bodyContent = content;
+
+			const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
+			if (frontmatterMatch) {
+				const frontmatterStr = frontmatterMatch[1];
+				bodyContent = frontmatterMatch[2];
+
+				// Parse frontmatter lines
+				const lines = frontmatterStr.split('\n');
+				for (const line of lines) {
+					const colonIndex = line.indexOf(':');
+					if (colonIndex > 0) {
+						const key = line.substring(0, colonIndex).trim();
+						let value: any = line.substring(colonIndex + 1).trim();
+
+						// Parse arrays like [tag1, tag2]
+						if (value.startsWith('[') && value.endsWith(']')) {
+							value = value.slice(1, -1).split(',').map(v => v.trim().replace(/['"]/g, ''));
+						}
+						frontmatter[key] = value;
+					}
+				}
+			}
+
+			// Extract title from first heading or filename
+			const titleMatch = bodyContent.match(/^#\s+(.+)$/m);
+			const title = titleMatch ? titleMatch[1] : pathModule.basename(filePath, '.md');
+
+			return {
+				success: true,
+				data: {
+					path: input.path,
+					title,
+					content: bodyContent.trim(),
+					frontmatter,
+					extractedAt: new Date().toISOString()
+				}
+			};
+		} catch (error) {
+			return { success: false, error: `Read local document failed: ${(error as Error).message}` };
+		}
+	}
+
+	/**
+	 * Validate local file path for security
+	 * Prevents path traversal attacks
+	 */
+	private isValidLocalPath(path: string): boolean {
+		// Must be absolute path
+		if (!path.startsWith('/') && !path.startsWith('~/')) {
+			return false;
+		}
+		// Prevent directory traversal
+		if (path.includes('..')) {
+			return false;
+		}
+		// Prevent ~ expansion in middle of path
+		if (path.includes('~') && !path.startsWith('~/')) {
+			return false;
+		}
+		return true;
+	}
+
+	/**
+	 * Summarize document content based on entity type
+	 * Extracts key information and generates a structured summary
+	 */
+	async summarizeDocument(input: SummarizeDocumentInput): Promise<ToolExecutionResult> {
+		try {
+			const { content, entityType, title } = input;
+
+			// For now, return a structured extraction based on entity type
+			// The actual AI summarization happens in the agent's LLM call
+			// This method provides structure for the agent to populate
+
+			const summary: Record<string, any> = {
+				extractedAt: new Date().toISOString(),
+				originalLength: content.length,
+				suggestedSummary: '',
+				keyPoints: [],
+				entityType
+			};
+
+			// Extract key information based on entity type
+			if (entityType === 'person') {
+				// Try to extract name, role, company
+				const nameMatch = content.match(/(?:name|姓名|名称)[:：]\s*(.+)/i);
+				const roleMatch = content.match(/(?:role|职位|职务)[:：]\s*(.+)/i);
+				const companyMatch = content.match(/(?:company|公司|企业)[:：]\s*(.+)/i);
+
+				summary.extractedFields = {
+					name: nameMatch?.[1] || title || 'Unknown',
+					role: roleMatch?.[1] || '',
+					company: companyMatch?.[1] || ''
+				};
+			} else if (entityType === 'project') {
+				// Try to extract goals, status, stakeholders
+				const goalMatch = content.match(/(?:goal|目标|目的)[:：]\s*(.+)/i);
+				const statusMatch = content.match(/(?:status|状态|进度)[:：]\s*(.+)/i);
+
+				summary.extractedFields = {
+					goal: goalMatch?.[1] || '',
+					status: statusMatch?.[1] || '进行中'
+				};
+			}
+
+			return {
+				success: true,
+				data: summary
+			};
+		} catch (error) {
+			return { success: false, error: `Summarize document failed: ${(error as Error).message}` };
 		}
 	}
 }

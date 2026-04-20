@@ -11,6 +11,7 @@
 import { AIMessage, ToolMessage, BaseMessage, HumanMessage } from '@langchain/core/messages';
 import type { AIProviderAdapter } from './adapter';
 import type { EntityTools } from './tools/entity-tools';
+import { summarizeEntries } from './tools/diary-tools';
 import type { WebClipperTools } from './tools/web-clipper-tools';
 import { AnalysisPhase as Phase } from '../../entities/types';
 
@@ -116,6 +117,45 @@ const TOOLS = [
 		}
 	},
 	{
+		name: 'get_diary_entries',
+		description: 'Get diary entries within a date range. Used for chat mode when user asks about diary content or wants summarization/reflection. Returns entries sorted by date (most recent first).',
+		parameters: {
+			type: 'object',
+			properties: {
+				startDate: { type: 'string', description: 'Start date in YYYY-MM-DD format' },
+				endDate: { type: 'string', description: 'End date in YYYY-MM-DD format' },
+				query: { type: 'string', description: 'Optional search query to filter entries by content' }
+			},
+			required: ['startDate', 'endDate']
+		}
+	},
+	{
+		name: 'summarize_entries',
+		description: 'Generate a formatted daily/weekly/monthly review from diary entries. Takes the output of read_diary_entries and produces a structured summary.',
+		parameters: {
+			type: 'object',
+			properties: {
+				entries: {
+					type: 'array',
+					description: 'Array of diary entries with date and content',
+					items: {
+						type: 'object',
+						properties: {
+							date: { type: 'string', description: 'Date in YYYY-MM-DD format' },
+							content: { type: 'string', description: 'Diary content' }
+						}
+					}
+				},
+				summaryType: {
+					type: 'string',
+					enum: ['daily', 'weekly', 'monthly'],
+					description: 'Type of summary to generate'
+				}
+			},
+			required: ['entries', 'summaryType']
+		}
+	},
+	{
 		name: 'clip_webpage',
 		description: 'Clip a webpage and convert to Markdown. Supports generic websites and WeChat articles. Returns title, content, author, and site name.',
 		parameters: {
@@ -149,6 +189,63 @@ const TOOLS = [
 				url: { type: 'string', description: 'URL of the webpage to clip and summarize' }
 			},
 			required: ['url']
+		}
+	},
+	{
+		name: 'search_vault',
+		description: 'Search vault documents by content query. Used in chat mode for full-text search across all vault documents.',
+		parameters: {
+			type: 'object',
+			properties: {
+				query: { type: 'string', description: 'Search query to find in vault documents' }
+			},
+			required: ['query']
+		}
+	},
+	{
+		name: 'read_document',
+		description: 'Read a document by path. Used in chat mode to read full content of a specific document.',
+		parameters: {
+			type: 'object',
+			properties: {
+				path: { type: 'string', description: 'Path to the document to read' }
+			},
+			required: ['path']
+		}
+	},
+	{
+		name: 'read_local_document',
+		description: 'Read a local Markdown file from the filesystem. Used when user provides an absolute path like /Users/xxx/Documents/xxx.md or path starting with ~.',
+		parameters: {
+			type: 'object',
+			properties: {
+				path: { type: 'string', description: 'Local file path to the Markdown document (must be absolute path starting with / or ~)' }
+			},
+			required: ['path']
+		}
+	},
+	{
+		name: 'summarize_document',
+		description: 'Summarize and extract key information from a Markdown document. Used after archiving a document to generate AI summary.',
+		parameters: {
+			type: 'object',
+			properties: {
+				content: { type: 'string', description: 'Document content to summarize' },
+				entityType: { type: 'string', enum: ['person', 'project', 'thing', 'idea', 'knowledge'], description: 'Entity type for context-aware summarization' },
+				title: { type: 'string', description: 'Document title for additional context' }
+			},
+			required: ['content', 'entityType']
+		}
+	},
+	{
+		name: 'get_related_entities',
+		description: 'Get related entities for an entity. Used in chat mode to explore entity relationships.',
+		parameters: {
+			type: 'object',
+			properties: {
+				entityId: { type: 'string', description: 'Entity ID to get related entities for' }
+			},
+			required: ['entityId']
 		}
 	}
 ];
@@ -218,19 +315,22 @@ export class BlockAnalysisMachine {
 	private webClipperTools?: WebClipperTools;
 	private systemPrompt: string;
 	private recentFunctionCalls: Array<{ name: string; args: string }> = [];
+	private isChatMode: boolean = false;
 
 	constructor(
 		state: AnalysisState,
 		llm: AIProviderAdapter,
 		tools: EntityTools,
 		systemPrompt: string,
-		webClipperTools?: WebClipperTools
+		webClipperTools?: WebClipperTools,
+		isChatMode: boolean = false
 	) {
 		this.state = state;
 		this.llm = llm;
 		this.tools = tools;
 		this.systemPrompt = systemPrompt;
 		this.webClipperTools = webClipperTools;
+		this.isChatMode = isChatMode;
 	}
 
 	/**
@@ -311,9 +411,11 @@ ${this.state.messages.slice(-4).map((m: any) => {
 	 * Add user message and continue
 	 */
 	async sendUserMessage(message: string): Promise<AnalysisState> {
-		// Inject continue context before the user's message
-		const continueContext = this.buildContinueContext();
-		this.state.messages.push(new HumanMessage({ content: continueContext }));
+		// Inject continue context only for analysis mode, not chat mode
+		if (!this.isChatMode) {
+			const continueContext = this.buildContinueContext();
+			this.state.messages.push(new HumanMessage({ content: continueContext }));
+		}
 		this.state.messages.push(new HumanMessage({ content: message }));
 		return this.runCycle();
 	}
@@ -414,6 +516,28 @@ ${this.state.messages.slice(-4).map((m: any) => {
 			calls.push({ name: funcName, args });
 		}
 
+		// Fallback: Try to detect natural language intent for get_diary_entries
+		// Some models say "call get_diary_entries" without outputting proper XML
+		if (calls.length === 0) {
+			const nlPattern = /(?:call|calls|calling|使用|调用)\s+(?:get_diary_entries|日记)/i;
+			if (nlPattern.test(text)) {
+				// Try to extract date from context - look for "今天" or date patterns
+				const today = new Date().toISOString().split('T')[0];
+				const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+
+				// Check if text mentions "今天" (today)
+				if (/今天|今日|current date/i.test(text)) {
+					calls.push({ name: 'get_diary_entries', args: { startDate: today, endDate: today } });
+				} else if (/昨天|yesterday/i.test(text)) {
+					calls.push({ name: 'get_diary_entries', args: { startDate: yesterday, endDate: yesterday } });
+				} else {
+					// Default to today
+					calls.push({ name: 'get_diary_entries', args: { startDate: today, endDate: today } });
+				}
+				console.log('[BlockAnalysis] Detected natural language intent, created fallback call:', calls[calls.length - 1]);
+			}
+		}
+
 		return calls;
 	}
 
@@ -448,6 +572,12 @@ ${this.state.messages.slice(-4).map((m: any) => {
 				case 'get_entity_history':
 					result = await this.tools.getEntityHistory(call.args);
 					break;
+				case 'get_diary_entries':
+					result = await this.tools.getDiaryEntries(call.args);
+					break;
+				case 'summarize_entries':
+					result = await summarizeEntries(call.args);
+					break;
 				case 'clip_webpage':
 					result = this.webClipperTools
 						? await this.webClipperTools.clipWebpageTool(call.args)
@@ -462,6 +592,21 @@ ${this.state.messages.slice(-4).map((m: any) => {
 					result = this.webClipperTools
 						? await this.webClipperTools.clipAndSummarize(call.args)
 						: { success: false, error: 'Web clipper not available' };
+					break;
+				case 'search_vault':
+					result = await this.tools.searchVault(call.args);
+					break;
+				case 'read_document':
+					result = await this.tools.readDocument(call.args);
+					break;
+				case 'read_local_document':
+					result = await this.tools.readLocalDocument(call.args);
+					break;
+				case 'summarize_document':
+					result = await this.tools.summarizeDocument(call.args);
+					break;
+				case 'get_related_entities':
+					result = await this.tools.getRelatedEntitiesFromVault(call.args);
 					break;
 				default:
 					result = { success: false, error: `Unknown tool: ${call.name}` };
@@ -533,6 +678,12 @@ ${this.state.messages.slice(-4).map((m: any) => {
 				case 'get_entity_history':
 					result = await this.tools.getEntityHistory(args);
 					break;
+				case 'get_diary_entries':
+					result = await this.tools.getDiaryEntries(args);
+					break;
+				case 'summarize_entries':
+					result = await summarizeEntries(args);
+					break;
 				case 'clip_webpage':
 					result = this.webClipperTools
 						? await this.webClipperTools.clipWebpageTool(args)
@@ -548,6 +699,21 @@ ${this.state.messages.slice(-4).map((m: any) => {
 						? await this.webClipperTools.clipAndSummarize(args)
 						: { success: false, error: 'Web clipper not available' };
 					break;
+				case 'search_vault':
+					result = await this.tools.searchVault(args);
+					break;
+				case 'read_document':
+					result = await this.tools.readDocument(args);
+					break;
+				case 'read_local_document':
+					result = await this.tools.readLocalDocument(args);
+					break;
+				case 'summarize_document':
+					result = await this.tools.summarizeDocument(args);
+					break;
+				case 'get_related_entities':
+					result = await this.tools.getRelatedEntitiesFromVault(args);
+					break;
 				default:
 					result = { success: false, error: `Unknown tool: ${name}` };
 			}
@@ -562,6 +728,73 @@ ${this.state.messages.slice(-4).map((m: any) => {
 				})
 			);
 		}
+	}
+
+	/**
+	 * Extract final response from Qwen-style thinking process
+	 * Qwen models output thinking as numbered steps, followed by the actual response
+	 * Pattern: "Final Output Generation. (Just the text).\n Actual response"
+	 */
+	private extractFinalResponse(text: string): string {
+		// Check if this is a thinking process format
+		if (!text.includes('Thinking Process:')) {
+			return text;
+		}
+
+		console.log('[BlockAnalysis] Detected thinking process format, extracting final response');
+
+		// Strategy: Find the last substantial Chinese text block which is usually the actual response
+		// Split by lines and find Chinese content that comes after analysis steps
+
+		// First, completely remove the Thinking Process header and all numbered steps
+		// This regex removes everything up to and including "Final Output Generation" or "Final Output:"
+		let cleaned = text;
+
+		// Remove "Thinking Process:" header
+		cleaned = cleaned.replace(/^Thinking Process:\s*/gim, '');
+
+		// Remove numbered analysis steps (1. **Analyze...**, 2. **Check...**, etc.)
+		cleaned = cleaned.replace(/^\d+\.\s+\*\*[^*]+\*\*[:：]?\s*/gm, '');
+
+		// Remove numbered steps without bold (1. Analyze..., 2. Check..., etc.)
+		cleaned = cleaned.replace(/^\d+\.\s+[A-Z][^:\n]*[:：]?\s*/gm, '');
+
+		// Remove bullet points in thinking (* Analyze..., * Check..., etc.)
+		cleaned = cleaned.replace(/^\s*[*\-]\s+/gm, '');
+
+		// Remove "Final Output Generation" and similar markers
+		cleaned = cleaned.replace(/Final Output Generation\.?\s*/gi, '');
+		cleaned = cleaned.replace(/Final Output:\s*/gi, '');
+		cleaned = cleaned.replace(/最终输出|Final Output/gi, '');
+
+		// Remove "(Just the text)" and similar meta comments
+		cleaned = cleaned.replace(/\(Just the text\)\.?\s*/g, '');
+		cleaned = cleaned.replace(/\(只需文本\)\.?\s*/g, '');
+
+		// Remove any remaining markdown bold markers used for labels
+		cleaned = cleaned.replace(/\*\*([^*]+)\*\*[:：]?\s*/g, '');
+
+		// Now find the actual Chinese response
+		const chineseLines: string[] = [];
+		for (const line of cleaned.split('\n')) {
+			const trimmed = line.trim();
+			// Keep lines that contain substantial Chinese text
+			if (trimmed.length > 5 && /[\u4e00-\u9fa5]/.test(trimmed)) {
+				chineseLines.push(trimmed);
+			}
+		}
+
+		if (chineseLines.length > 0) {
+			// Return the last substantial Chinese line (usually the final response)
+			const response = chineseLines[chineseLines.length - 1].trim();
+			console.log('[BlockAnalysis] Extracted Chinese response:', response.substring(0, 100));
+			return response;
+		}
+
+		// Fallback: return cleaned text if no Chinese found
+		const finalCleaned = cleaned.replace(/\s+/g, ' ').trim();
+		console.log('[BlockAnalysis] Fallback cleaned response:', finalCleaned.substring(0, 100));
+		return finalCleaned || text;
 	}
 
 	/**
@@ -583,14 +816,49 @@ ${this.state.messages.slice(-4).map((m: any) => {
 
 		console.log('[BlockAnalysis] extractText raw:', text.substring(0, 500));
 
-		// Remove thinking tags and their contents
+		// Remove Qwen/Tongyi style thinking process (plain text format)
+		text = this.extractFinalResponse(text);
+		console.log('[BlockAnalysis] after extractFinalResponse:', text.substring(0, 200));
+
+		// Try to extract function calls from inside thinking tags before stripping
+		// Some models put tool calls inside thinking
+		const thinkingPattern = /<thinking>[\s\S]*?<\/thinking>/gi;
+		const matches = text.match(thinkingPattern);
+		let extractedCalls = '';
+		if (matches) {
+			for (const match of matches) {
+				// Extract any <invoke> tags from within thinking
+				const invokeMatches = match.match(/<invoke[^>]*>[\s\S]*?<\/invoke>/gi);
+				if (invokeMatches) {
+					extractedCalls += invokeMatches.join('\n');
+				}
+			}
+			console.log('[BlockAnalysis] Extracted calls from thinking:', extractedCalls.substring(0, 200));
+		}
+
+		// Completely remove all thinking tags and their contents
 		text = text
-			.replace(/<think>[\s\S]*?<\/think>/gi, '')
+			.replace(/<thinking>[\s\S]*?<\/thinking>/gi, '')
 			.replace(/<THINKING>[\s\S]*?<\/THINKING>/gi, '')
 			.replace(/<思考>[\s\S]*?<\/思考>/gi, '')
 			.replace(/<note>[\s\S]*?<\/note>/gi, '')
 			.replace(/<备注>[\s\S]*?<\/备注>/gi, '')
+			// XML format: <thinking>...</thinking> or <Thinking>...</Thinking>
+			.replace(/<[Tt]hinking>[\s\S]*?<\/[Tt]hinking>/gi, '')
+			// XML format: <think>...</ thinkers> or </think> variants
+			.replace(/<[Tt]hink>[\s\S]*?<\/[Tt]hink>/gi, '')
+			// Fallback: remove any standalone thinking tags that might slip through
+			.replace(/<\/?[Tt]hink>/g, '')
+			.replace(/<\/?[Tt]hinking>/g, '')
 			.trim();
+
+		// Normalize whitespace
+		text = text.replace(/\s+/g, ' ').trim();
+
+		// Prepend any extracted calls from thinking
+		if (extractedCalls) {
+			text = extractedCalls + '\n' + text;
+		}
 
 		return text;
 	}

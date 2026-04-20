@@ -5,6 +5,7 @@
 
 import { App, TFile, TFolder, Vault, CachedMetadata } from 'obsidian';
 import { Entity, EntityType, EntityCreateInput } from './types';
+import { loadTemplateLines } from '../utils/template-loader';
 
 const ENTITY_FOLDERS: Record<EntityType, string> = {
 	person: 'People',
@@ -238,7 +239,7 @@ export class EntityManager {
 		};
 
 		// Write file
-		const content = this.entityToMarkdown(fullEntity);
+		const content = await this.entityToMarkdown(fullEntity);
 		console.log('[EntityManager] Creating file with content length:', content.length);
 
 		try {
@@ -284,8 +285,16 @@ export class EntityManager {
 	 * Add interaction to entity
 	 */
 	async addInteraction(entityId: string, interaction: Entity['interactions'][0]): Promise<void> {
-		const entity = this.entityCache.get(entityId);
-		if (!entity) return;
+		let entity = this.entityCache.get(entityId);
+
+		// If entity not in cache, try to reload it from disk
+		if (!entity) {
+			entity = await this.reloadEntity(entityId);
+			if (!entity) {
+				console.warn(`[EntityManager] addInteraction: Entity ${entityId} not found in cache or on disk`);
+				return;
+			}
+		}
 
 		const updatedInteractions = [...entity.interactions, interaction];
 		await this.updateEntity(entityId, {
@@ -295,11 +304,47 @@ export class EntityManager {
 	}
 
 	/**
+	 * Reload entity from disk by ID
+	 */
+	private async reloadEntity(entityId: string): Promise<Entity | null> {
+		// Find all entity files and try to find the one with matching ID
+		const folders = ['People', 'Projects', 'Things', 'Ideas', 'Knowledge'];
+
+		for (const folder of folders) {
+			const folderPath = folder;
+			const folderObj = this.app.vault.getAbstractFileByPath(folderPath);
+			if (!folderObj || !(folderObj instanceof TFolder)) {
+				continue;
+			}
+
+			try {
+				const files = this.app.vault.getMarkdownFiles()
+					.filter(f => f.path.startsWith(folderPath + '/'));
+
+				for (const file of files) {
+					const cache = this.app.metadataCache.getFileCache(file);
+					const frontmatter = cache?.frontmatter || {};
+					const fileEntityId = this.generateEntityId(file.path);
+
+					if (fileEntityId === entityId) {
+						// Found the file, re-index it
+						return await this.indexFile(file);
+					}
+				}
+			} catch {
+				// Skip files that can't be read
+			}
+		}
+
+		return null;
+	}
+
+	/**
 	 * Convert entity to markdown content
 	 */
-	private entityToMarkdown(entity: Entity): string {
+	private async entityToMarkdown(entity: Entity): Promise<string> {
 		const frontmatter = this.entityToFrontmatter(entity);
-		const body = this.entityToBody(entity);
+		const body = await this.entityToBody(entity);
 
 		return `---
 ${frontmatter}
@@ -381,9 +426,9 @@ ${body}`;
 	}
 
 	/**
-	 * Generate body content from entity (follows PRD 3.3.x templates)
+	 * Generate body content from entity using templates
 	 */
-	private entityToBody(entity: Entity): string {
+	private async entityToBody(entity: Entity): Promise<string> {
 		const lines: string[] = [];
 
 		lines.push(`# ${entity.title}`);
@@ -396,263 +441,56 @@ ${body}`;
 			lines.push('');
 		}
 
-		// Type-specific sections following PRD templates
-		switch (entity.type) {
-			case 'person':
-				lines.push(...this.generatePersonBody(entity));
-				break;
-			case 'project':
-				lines.push(...this.generateProjectBody(entity));
-				break;
-			case 'task':
-				lines.push(...this.generateTaskBody(entity));
-				break;
-			case 'thing':
-				lines.push(...this.generateThingBody(entity));
-				break;
-			case 'idea':
-				lines.push(...this.generateIdeaBody(entity));
-				break;
-			case 'knowledge':
-				lines.push(...this.generateKnowledgeBody(entity));
-				break;
+		// Load and render type-specific template
+		const templatePath = `${entity.type}-template.md`;
+		try {
+			const templateLines = await loadTemplateLines(
+				this.app.vault,
+				templatePath,
+				{ entity }
+			);
+			lines.push(...templateLines);
+		} catch (error) {
+			console.warn(`[EntityManager] Failed to load template ${templatePath}, using default:`, error);
+			// Fallback to basic content if template fails
+			lines.push(...this.getDefaultBody(entity));
 		}
 
 		return lines.join('\n');
 	}
 
 	/**
-	 * Person body template (PRD 3.3.2)
+	 * Get default body content when template is not available
 	 */
-	private generatePersonBody(entity: Entity): string[] {
+	private getDefaultBody(entity: Entity): string[] {
 		const lines: string[] = [];
-		const m = entity.metadata || {};
-
-		lines.push('## 基本信息');
-		if (m.company) lines.push(`- **公司**: ${m.company}`);
-		if (m.position) lines.push(`- **职位**: ${m.position}`);
-		if (m.first_contact) lines.push(`- **首次接触**: ${m.first_contact}`);
-		if (m.contact_channel) lines.push(`- **渠道**: ${m.contact_channel}`);
-		lines.push('');
-
-		lines.push('## 背景');
-		lines.push('待补充');
-		lines.push('');
-
-		lines.push('## 互动记录');
-		if (entity.interactions.length === 0) {
-			lines.push('暂无互动记录');
-		} else {
-			for (const interaction of entity.interactions.slice(-5)) {
-				const date = interaction.timestamp.split('T')[0];
-				const blockRef = interaction.sourceBlockId ? ` → [[${date}]]` : '';
-				lines.push(`- ${date}: ${interaction.content}${blockRef}`);
-			}
+		switch (entity.type) {
+			case 'person':
+				lines.push('## 基本信息');
+				lines.push('- **公司**: 待补充');
+				lines.push('- **职位**: 待补充');
+				break;
+			case 'project':
+				lines.push('## 项目信息');
+				lines.push('待补充');
+				break;
+			case 'task':
+				lines.push('## 任务信息');
+				lines.push('待补充');
+				break;
+			case 'thing':
+				lines.push('## 基本信息');
+				lines.push('待补充');
+				break;
+			case 'idea':
+				lines.push('## 想法描述');
+				lines.push('待补充');
+				break;
+			case 'knowledge':
+				lines.push('## 摘要');
+				lines.push('待补充');
+				break;
 		}
-		lines.push('');
-
-		lines.push('## 跟进事项');
-		lines.push('- [ ] 补充公司背景');
-		lines.push('- [ ] 补充职位详情');
-
-		return lines;
-	}
-
-	/**
-	 * Project body template (PRD 3.3.3)
-	 */
-	private generateProjectBody(entity: Entity): string[] {
-		const lines: string[] = [];
-		const m = entity.metadata || {};
-
-		lines.push('## 项目信息');
-		lines.push(entity.summary || '待补充');
-		lines.push('');
-
-		lines.push('## 背景');
-		lines.push('待补充');
-		lines.push('');
-
-		lines.push('## 关键里程碑');
-		if (m.milestones && Array.isArray(m.milestones)) {
-			for (const milestone of m.milestones) {
-				const status = milestone.status === 'completed' ? '[x]' : '[ ]';
-				lines.push(`- ${status} ${milestone.title}`);
-			}
-		} else {
-			lines.push('- [ ] 需求确认');
-			lines.push('- [ ] 方案交付');
-			lines.push('- [ ] 项目验收');
-		}
-		lines.push('');
-
-		lines.push('## 跟进事项');
-		lines.push('- [ ] 补充客户详细信息');
-		lines.push('- [ ] 补充预算信息');
-
-		return lines;
-	}
-
-	/**
-	 * Task body template
-	 * Tasks are categorized under Projects folder
-	 */
-	private generateTaskBody(entity: Entity): string[] {
-		const lines: string[] = [];
-		const m = entity.metadata || {};
-
-		lines.push('## 任务信息');
-		lines.push(entity.summary || '待补充');
-		lines.push('');
-
-		lines.push('## 基本属性');
-		lines.push(`- **状态**: ${m.status || '待处理'}`);
-		lines.push(`- **优先级**: ${m.priority || '中'}`);
-		if (m.deadline) lines.push(`- **截止日期**: ${m.deadline}`);
-		if (m.assignee) lines.push(`- **负责人**: ${m.assignee}`);
-		lines.push('');
-
-		lines.push('## 所属项目');
-		if (m.project_name) lines.push(`- **项目名称**: ${m.project_name}`);
-		if (m.project_id) lines.push(`- **项目ID**: ${m.project_id}`);
-		lines.push('');
-
-		lines.push('## 任务描述');
-		lines.push(m.description || '待补充');
-		lines.push('');
-
-		lines.push('## 子任务');
-		if (m.subtasks && Array.isArray(m.subtasks)) {
-			for (const subtask of m.subtasks) {
-				const status = subtask.completed ? '[x]' : '[ ]';
-				lines.push(`- ${status} ${subtask.title}`);
-			}
-		} else {
-			lines.push('- [ ] 子任务1');
-			lines.push('- [ ] 子任务2');
-		}
-		lines.push('');
-
-		lines.push('## 进度记录');
-		if (entity.interactions.length === 0) {
-			lines.push('暂无相关记录');
-		} else {
-			for (const interaction of entity.interactions.slice(-5)) {
-				const date = interaction.timestamp.split('T')[0];
-				lines.push(`- ${date}: ${interaction.content}`);
-			}
-		}
-		lines.push('');
-
-		lines.push('## 备注');
-		lines.push(m.notes || '暂无备注');
-
-		return lines;
-	}
-
-	/**
-	 * Thing body template (PRD 3.3.4)
-	 */
-	private generateThingBody(entity: Entity): string[] {
-		const lines: string[] = [];
-		const m = entity.metadata || {};
-
-		lines.push('## 基本信息');
-		if (m.thing_type) lines.push(`- **类型**: ${m.thing_type}`);
-		if (m.url) lines.push(`- **链接**: ${m.url}`);
-		if (m.price_range) lines.push(`- **价格**: ${m.price_range}`);
-		lines.push('');
-
-		if (m.why_interesting) {
-			lines.push('## 为什么关注');
-			lines.push(m.why_interesting);
-			lines.push('');
-		}
-
-		lines.push('## 跟进记录');
-		if (entity.interactions.length === 0) {
-			lines.push('暂无相关记录');
-		} else {
-			for (const interaction of entity.interactions.slice(-5)) {
-				const date = interaction.timestamp.split('T')[0];
-				lines.push(`- ${date}: ${interaction.content}`);
-			}
-		}
-
-		return lines;
-	}
-
-	/**
-	 * Idea body template (PRD 3.3.5)
-	 */
-	private generateIdeaBody(entity: Entity): string[] {
-		const lines: string[] = [];
-
-		lines.push('## 想法描述');
-		lines.push(entity.summary || '待补充');
-		lines.push('');
-
-		lines.push('## 相关链接');
-		// Link to related entities via Obsidian links
-		if (entity.relatedEntities.length > 0) {
-			for (const rel of entity.relatedEntities) {
-				if (rel.entityId) {
-					// Find the related entity title
-					const related = this.entityCache.get(rel.entityId);
-					if (related) {
-						lines.push(`- [[${related.title}]]`);
-					}
-				}
-			}
-		}
-		lines.push('');
-
-		lines.push('## 进展记录');
-		if (entity.interactions.length === 0) {
-			lines.push('暂无相关记录');
-		} else {
-			for (const interaction of entity.interactions.slice(-5)) {
-				const date = interaction.timestamp.split('T')[0];
-				lines.push(`- ${date}: ${interaction.content}`);
-			}
-		}
-
-		return lines;
-	}
-
-	/**
-	 * Knowledge body template (PRD 3.3.6)
-	 */
-	private generateKnowledgeBody(entity: Entity): string[] {
-		const lines: string[] = [];
-		const m = entity.metadata || {};
-
-		lines.push('## 摘要');
-		lines.push(entity.summary || '待补充');
-		lines.push('');
-
-		if (m.url) {
-			lines.push('## 链接');
-			lines.push(m.url);
-			lines.push('');
-		}
-
-		lines.push('## 核心内容');
-		lines.push(m.content || '...');
-		lines.push('');
-
-		if (entity.relatedEntities.length > 0) {
-			lines.push('## 相关引用');
-			for (const rel of entity.relatedEntities) {
-				if (rel.entityId) {
-					const related = this.entityCache.get(rel.entityId);
-					if (related) {
-						lines.push(`- [[${related.title}]]`);
-					}
-				}
-			}
-		}
-
 		return lines;
 	}
 

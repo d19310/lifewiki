@@ -8,9 +8,19 @@ import { AnalysisPhase, ChatMessage, AnalysisResult, EntityPreview } from '../en
 
 describe('SessionManager', () => {
 	let manager: SessionManager;
+	let mockApp: any;
 
 	beforeEach(() => {
-		manager = new SessionManager();
+		mockApp = {
+			vault: {
+				getAbstractFileByPath: jest.fn().mockReturnValue(null),
+				adapter: {
+					list: jest.fn().mockResolvedValue({ files: [] }),
+					write: jest.fn().mockResolvedValue(undefined)
+				}
+			}
+		};
+		manager = new SessionManager(mockApp);
 	});
 
 	describe('session creation', () => {
@@ -209,18 +219,18 @@ describe('SessionManager', () => {
 	});
 
 	describe('session clearing', () => {
-		it('should clear specific session', () => {
+		it('should clear specific session', async () => {
 			const blockId = 'block-010';
 			manager.getOrCreateSession(blockId);
 			manager.addMessage(blockId, { role: 'user', content: 'test' });
 
-			const cleared = manager.clearSession(blockId);
+			const cleared = await manager.clearSession(blockId);
 			expect(cleared).toBe(true);
 			expect(manager.getSession(blockId)).toBeUndefined();
 		});
 
-		it('should return false when clearing non-existent session', () => {
-			const cleared = manager.clearSession('non-existent');
+		it('should return false when clearing non-existent session', async () => {
+			const cleared = await manager.clearSession('non-existent');
 			expect(cleared).toBe(false);
 		});
 

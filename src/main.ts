@@ -10,6 +10,8 @@ import { ConversationFlow } from './ai/conversation-flow';
 import { createLangGraphAgent, LangGraphAgent } from './ai/langgraph/agent';
 import type { AIProvider } from './ai/provider';
 import type { AnalysisResult } from './entities/types';
+import { ProviderManager, DefaultAIProvider } from './ai/providers';
+import { AgentRegistry, DiaryAgent, ChatAgent } from './ai/agents';
 
 export default class LifeWikiPlugin extends Plugin {
 	settings!: LifeWikiSettings;
@@ -22,6 +24,7 @@ export default class LifeWikiPlugin extends Plugin {
 	conversationFlow!: ConversationFlow;
 	langGraphAgent?: LangGraphAgent;
 	aiAnalysisView?: AIAnalysisPanelView;
+	agentRegistry?: AgentRegistry;
 
 	constructor(app: App, manifest: PluginManifest) {
 		super(app, manifest);
@@ -68,6 +71,50 @@ export default class LifeWikiPlugin extends Plugin {
 			);
 			await this.langGraphAgent.initialize();
 			console.log('LifeWiki: LangGraph agent initialized');
+
+			// Initialize Agent Registry for multi-agent support
+			if (this.settings.useNewAgentArchitecture) {
+				console.log('LifeWiki: Initializing Agent Registry...');
+				const { ProviderManager, DefaultAIProvider } = await import('./ai/providers');
+				const { AgentRegistry, DiaryAgent, ChatAgent } = await import('./ai/agents');
+				const { CustomProvider } = await import('./ai/providers');
+
+				const providerManager = new ProviderManager();
+
+				// Register default AI provider
+				providerManager.registerProvider(new DefaultAIProvider(this.aiProvider));
+				providerManager.setDefaultProvider('default');
+
+				// Register custom providers from settings
+				for (const customConfig of this.settings.customProviders) {
+					const customProvider = new CustomProvider(customConfig);
+					providerManager.registerProvider(customProvider);
+				}
+
+				// Set up agent-provider mapping from settings
+				const mapping = this.settings.agentProviderMapping;
+				if (mapping.diary) {
+					providerManager.setAgentProvider('diary', mapping.diary);
+				}
+				if (mapping.chat) {
+					providerManager.setAgentProvider('chat', mapping.chat);
+				}
+
+				this.agentRegistry = new AgentRegistry(providerManager);
+
+				// Create agents with AgentRegistry reference (not fixed provider)
+				const diaryAgent = new DiaryAgent(this.agentRegistry, this.entityManager, this.app);
+				const chatAgent = new ChatAgent(this.agentRegistry, this.entityManager, this.app);
+
+				// Initialize agents (they will get their provider from AgentRegistry)
+				await diaryAgent.initialize();
+				await chatAgent.initialize();
+
+				this.agentRegistry.registerAgent(diaryAgent);
+				this.agentRegistry.registerAgent(chatAgent);
+
+				console.log('LifeWiki: Agent Registry initialized');
+			}
 
 			this.registerView(VIEW_TYPE_BLOCK_EDITOR, (leaf) => new BlockEditorView(leaf, this));
 			this.registerView(VIEW_TYPE_AI_ANALYSIS, (leaf) => {
@@ -228,5 +275,9 @@ export default class LifeWikiPlugin extends Plugin {
 
 	getAIAnalysisView(): AIAnalysisPanelView | undefined {
 		return this.aiAnalysisView;
+	}
+
+	getAgentRegistry(): AgentRegistry | undefined {
+		return this.agentRegistry;
 	}
 }

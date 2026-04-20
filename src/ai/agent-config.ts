@@ -1,6 +1,6 @@
 /**
  * Agent Configuration Loader
- * Loads agent config files from .lifewiki/agent/ directory
+ * Loads agent config files from .lifewiki/agents/{agentId}/ directory
  */
 
 export interface AgentConfig {
@@ -9,9 +9,14 @@ export interface AgentConfig {
 	skills: string;
 	memory: string;
 	wiki: string;
+	chatPrompt: string;
 }
 
-const AGENT_DIR = '.lifewiki/agent';
+const AGENTS_DIR = '.lifewiki/agents';
+
+function getAgentDir(agentId: string): string {
+	return `${AGENTS_DIR}/${agentId}`;
+}
 
 const DEFAULT_IDENTITY = `# LifeWiki Agent 身份
 
@@ -99,6 +104,22 @@ const DEFAULT_SOUL = `# LifeWiki Agent 分析规范
 ### 所有类别处理完毕
 > 这条日记分析完了，还有别的要处理吗？
 
+### 检测本地文档
+当用户输入包含本地 .md 文件路径时（如 /Users/xxx/Documents/xxx.md 或 ~/xxx.md）：
+> 检测到本地文档：{文件名}
+> 要将它归档为哪种实体？人脉 / 项目 / 物品 / 想法 / 知识
+
+用户确认后，使用 read_local_document 工具读取文档内容，然后创建实体。
+
+### 检测 Obsidian 双链
+当用户输入包含 [[双链]] 格式时：
+> 发现文档引用：[[文档名]]
+> 要将它归档到知识库吗？
+
+### 归档后询问摘要
+创建实体档案后，询问用户：
+> 文档已归档。需要我生成摘要和解读吗？
+
 ## 格式要求
 - 实体名称用 **加粗** 格式，界面需要高亮显示
 - 回复简洁，不超过 50 字
@@ -155,6 +176,8 @@ const DEFAULT_SKILLS = `# LifeWiki Agent 可用技能
   "entityType": "person|project|task|thing|idea|knowledge",
   "name": "实体名称",
   "summary": "一句话描述",
+  "sourceDocument": "/Users/xxx/Documents/xxx.md",
+  "sourceContent": "文档内容摘要...",
   "metadata": {
     "status": "active",
     "source": "diary"
@@ -170,6 +193,10 @@ const DEFAULT_SKILLS = `# LifeWiki Agent 可用技能
   "path": "People/实体名称.md"
 }
 \`\`\`
+
+**注意**:
+- sourceDocument: 可选，源文档的本地路径
+- sourceContent: 可选，源文档的内容摘要
 
 ### update_entity
 更新已有实体。
@@ -219,6 +246,142 @@ const DEFAULT_SKILLS = `# LifeWiki Agent 可用技能
 {
   "entityType": "person|project|task|thing|idea|knowledge",
   "status": "active|all"
+}
+\`\`\`
+
+### get_diary_entries
+获取指定日期范围内的日记条目。用于聊天模式下用户要求查看、总结或复盘日记内容时。
+
+**输入**:
+\`\`\`json
+{
+  "startDate": "2026-04-01",
+  "endDate": "2026-04-19",
+  "query": "可选的搜索关键词"
+}
+\`\`\`
+
+**输出**:
+\`\`\`json
+{
+  "entries": [
+    { "date": "20260419", "content": "日记内容..." },
+    { "date": "20260418", "content": "日记内容..." }
+  ],
+  "total": 2
+}
+\`\`\`
+
+### search_vault
+在vault中搜索文档内容。
+
+**输入**:
+\`\`\`json
+{
+  "query": "搜索关键词"
+}
+\`\`\`
+
+**输出**:
+\`\`\`json
+{
+  "files": [
+    { "path": "People/张三.md", "snippet": "...匹配的文本片段..." }
+  ],
+  "total": 5
+}
+\`\`\`
+
+### read_document
+读取指定路径的文档完整内容。
+
+**输入**:
+\`\`\`json
+{
+  "path": "People/张三.md"
+}
+\`\`\`
+
+**输出**:
+\`\`\`json
+{
+  "path": "People/张三.md",
+  "content": "文档的完整内容...",
+  "frontmatter": { "entity_id": "xxx", "entity_type": "person" }
+}
+\`\`\`
+
+### read_local_document
+读取本地文件系统中的 Markdown 文档。当用户提供绝对路径（如 /Users/xxx/Documents/xxx.md 或 ~/Documents/xxx.md）时使用。
+
+**输入**:
+\`\`\`json
+{
+  "path": "/Users/xxx/Documents/项目笔记.md"
+}
+\`\`\`
+
+**输出**:
+\`\`\`json
+{
+  "success": true,
+  "data": {
+    "path": "/Users/xxx/Documents/项目笔记.md",
+    "title": "项目笔记",
+    "content": "文档正文内容...",
+    "frontmatter": { "tags": ["项目"] },
+    "extractedAt": "2026-04-20T12:00:00.000Z"
+  }
+}
+\`\`\`
+
+### summarize_document
+对文档内容进行摘要和关键信息提取。根据实体类型提取不同维度的信息。
+
+**输入**:
+\`\`\`json
+{
+  "content": "文档内容...",
+  "entityType": "person|project|thing|idea|knowledge",
+  "title": "文档标题（可选）"
+}
+\`\`\`
+
+**输出**:
+\`\`\`json
+{
+  "success": true,
+  "data": {
+    "extractedAt": "2026-04-20T12:00:00.000Z",
+    "originalLength": 5000,
+    "suggestedSummary": "摘要文本...",
+    "keyPoints": ["要点1", "要点2"],
+    "entityType": "project",
+    "extractedFields": {
+      "goal": "项目目标",
+      "status": "进行中"
+    }
+  }
+}
+\`\`\`
+
+### get_related_entities
+获取实体的关联实体列表。
+
+**输入**:
+\`\`\`json
+{
+  "entityId": "实体ID"
+}
+\`\`\`
+
+**输出**:
+\`\`\`json
+{
+  "entity": { "id": "xxx", "name": "实体名称", "type": "person" },
+  "related": [
+    { "entity": { "id": "yyy", "name": "关联实体", "type": "project" }, "relation": "负责人", "context": "备注" }
+  ]
 }
 \`\`\``;
 
@@ -313,14 +476,78 @@ const DEFAULT_WIKI = `# LifeWiki 知识库规范
 - related_entities: 关联实体列表
 - interactions: 互动历史`;
 
+export const DEFAULT_CHAT_PROMPT = `# LifeWiki AI 助手 - 聊天模式
+
+## 角色
+你是一个友好的AI助手，可以和用户讨论各种话题，包括日记复盘、思考总结、实体查询等。
+
+## 能力
+- ✓ 回答用户问题
+- ✓ 总结和复盘日记内容
+- ✓ 查询已归档的实体信息
+- ✓ 提供建议和思考
+
+## 对话风格
+- 友好、自然，像朋友聊天
+- 简洁明了，不啰嗦
+- **禁止输出思考过程、推理步骤或分析说明**
+- **只输出最终的对话回复，不要解释你怎么想的**
+- 可以使用表情符号增加亲切感
+
+## 重要规则：绝对禁止输出思考过程
+
+❌ 错误示例（包括但不限于以下格式）：
+- "好的，用户发来'你好'，看起来是开始对话。根据系统设定，我需要..."
+- "Thinking Process: 1. Analyze... 2. Determine... 3. Draft... Final Output: ..."
+- 任何包含 "思考过程"、"Thinking Process"、"分析：" 等前缀的文本
+
+✅ 正确示例：
+"你好呀！😊 今天有什么想聊的吗？"
+
+**你的回复必须只有对话内容，没有任何思考、推理、分析的痕迹。不要输出 Thinking Process、不要输出编号步骤、不要输出分析说明。**
+
+## 日记复盘流程
+当用户要求查看、总结或复盘日记时：
+
+1. 先用 read_diary_entries 读取日记内容
+2. 再用 summarize_entries 生成格式化复盘
+
+**日期快捷表达**：
+- 今天 → 今日日期
+- 昨天 → 昨日日期
+- 本周 → 本周一至今天
+- 上周 → 上周一至上周日
+- 本月 → 本月1日至今天
+
+## 重要：函数调用格式
+
+当需要执行技能时，必须使用以下XML格式：
+
+正确格式：
+<function_calls><invoke name="read_diary_entries"><parameter name="startDate">2026-04-19</parameter><parameter name="endDate">2026-04-19</parameter></invoke></function_calls>
+
+<function_calls><invoke name="summarize_entries"><parameter name="entries">[{"date": "2026-04-19", "content": "日记内容"}]</parameter><parameter name="summaryType">daily</parameter></invoke></function_calls>
+
+错误格式（不要使用）：
+\`\`\`
+read_diary_entries: {"startDate": "2026-04-19"}
+\`\`\`
+
+## 注意事项
+- 日记内容中可能包含 block ID 标记（如 <sub>uuid</sub> 或 <!-- uuid -->），请忽略
+- 复盘格式参考：DIARY_REVIEW_SKILL.md
+- 直接用自然语言回复即可`;
+
 /**
- * Load agent configuration from .lifewiki/agent/ directory
+ * Load agent configuration from .lifewiki/agents/{agentId}/ directory
  * Falls back to defaults if files don't exist
  */
-export async function loadAgentConfig(app: any): Promise<AgentConfig> {
+export async function loadAgentConfig(app: any, agentId: string = 'diary'): Promise<AgentConfig> {
+	const agentDir = getAgentDir(agentId);
+
 	const readFile = async (filename: string, fallback: string): Promise<string> => {
 		try {
-			const path = `${AGENT_DIR}/${filename}`;
+			const path = `${agentDir}/${filename}`;
 			const file = app.vault.getAbstractFileByPath(path);
 
 			// Check if file exists - TFile has a 'stat' property
@@ -334,12 +561,13 @@ export async function loadAgentConfig(app: any): Promise<AgentConfig> {
 		return fallback;
 	};
 
-	const [identity, soul, skills, memory, wiki] = await Promise.all([
+	const [identity, soul, skills, memory, wiki, chatPrompt] = await Promise.all([
 		readFile('IDENTITY.md', DEFAULT_IDENTITY),
 		readFile('SOUL.md', DEFAULT_SOUL),
 		readFile('SKILL.md', DEFAULT_SKILLS),
 		readFile('MEMORY.md', DEFAULT_MEMORY),
-		readFile('WIKI.md', DEFAULT_WIKI)
+		readFile('WIKI.md', DEFAULT_WIKI),
+		readFile('CHAT.md', DEFAULT_CHAT_PROMPT)
 	]);
 
 	return {
@@ -347,6 +575,7 @@ export async function loadAgentConfig(app: any): Promise<AgentConfig> {
 		soul,
 		skills,
 		memory,
-		wiki
+		wiki,
+		chatPrompt
 	};
 }

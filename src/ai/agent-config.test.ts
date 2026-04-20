@@ -51,20 +51,20 @@ describe('AgentConfig', () => {
 
 			// IDENTITY.md exists - TFile has a stat property
 			(mockApp.vault.getAbstractFileByPath as jest.Mock).mockImplementation((path: string) => {
-				if (path === '.lifewiki/agent/IDENTITY.md') {
+				if (path === '.lifewiki/agents/diary/IDENTITY.md') {
 					return { path, stat: {} };  // TFile-like object with stat
 				}
 				return null;
 			});
 
 			(mockApp.vault.read as jest.Mock).mockImplementation(async (file: any) => {
-				if (file.path === '.lifewiki/agent/IDENTITY.md') {
+				if (file.path === '.lifewiki/agents/diary/IDENTITY.md') {
 					return '# 自定义身份\n\n我是一个测试Agent';
 				}
 				throw new Error('File not found');
 			});
 
-			const config = await loadAgentConfig(mockApp as any);
+			const config = await loadAgentConfig(mockApp as any, 'diary');
 
 			expect(config.identity).toBe('# 自定义身份\n\n我是一个测试Agent');
 		});
@@ -72,11 +72,11 @@ describe('AgentConfig', () => {
 		it('should load all config files when all exist', async () => {
 			const mockApp = createMockApp();
 			const files = [
-				'.lifewiki/agent/IDENTITY.md',
-				'.lifewiki/agent/SOUL.md',
-				'.lifewiki/agent/SKILL.md',
-				'.lifewiki/agent/MEMORY.md',
-				'.lifewiki/agent/WIKI.md'
+				'.lifewiki/agents/diary/IDENTITY.md',
+				'.lifewiki/agents/diary/SOUL.md',
+				'.lifewiki/agents/diary/SKILL.md',
+				'.lifewiki/agents/diary/MEMORY.md',
+				'.lifewiki/agents/diary/WIKI.md'
 			];
 
 			(mockApp.vault.getAbstractFileByPath as jest.Mock).mockImplementation((path: string) => {
@@ -88,16 +88,16 @@ describe('AgentConfig', () => {
 
 			(mockApp.vault.read as jest.Mock).mockImplementation(async (file: any) => {
 				const contentMap: Record<string, string> = {
-					'.lifewiki/agent/IDENTITY.md': '# IDENTITY',
-					'.lifewiki/agent/SOUL.md': '# SOUL',
-					'.lifewiki/agent/SKILL.md': '# SKILLS',
-					'.lifewiki/agent/MEMORY.md': '# MEMORY',
-					'.lifewiki/agent/WIKI.md': '# WIKI'
+					'.lifewiki/agents/diary/IDENTITY.md': '# IDENTITY',
+					'.lifewiki/agents/diary/SOUL.md': '# SOUL',
+					'.lifewiki/agents/diary/SKILL.md': '# SKILLS',
+					'.lifewiki/agents/diary/MEMORY.md': '# MEMORY',
+					'.lifewiki/agents/diary/WIKI.md': '# WIKI'
 				};
 				return contentMap[file.path] || '';
 			});
 
-			const config = await loadAgentConfig(mockApp as any);
+			const config = await loadAgentConfig(mockApp as any, 'diary');
 
 			expect(config.identity).toBe('# IDENTITY');
 			expect(config.soul).toBe('# SOUL');
@@ -111,20 +111,20 @@ describe('AgentConfig', () => {
 
 			// Only IDENTITY.md exists
 			(mockApp.vault.getAbstractFileByPath as jest.Mock).mockImplementation((path: string) => {
-				if (path === '.lifewiki/agent/IDENTITY.md') {
+				if (path === '.lifewiki/agents/diary/IDENTITY.md') {
 					return { path, stat: {} };  // TFile-like
 				}
 				return null;
 			});
 
 			(mockApp.vault.read as jest.Mock).mockImplementation(async (file: any) => {
-				if (file.path === '.lifewiki/agent/IDENTITY.md') {
+				if (file.path === '.lifewiki/agents/diary/IDENTITY.md') {
 					return '# 自定义IDENTITY';
 				}
 				throw new Error('File not found');
 			});
 
-			const config = await loadAgentConfig(mockApp as any);
+			const config = await loadAgentConfig(mockApp as any, 'diary');
 
 			// IDENTITY should be custom, others should be defaults
 			expect(config.identity).toBe('# 自定义IDENTITY');

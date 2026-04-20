@@ -1,4 +1,4 @@
-# LifeWiki 产品规格文档 V0.1
+# LifeWiki 产品规格文档 V1.1
 
 ## 1. 产品概述
 
@@ -286,11 +286,41 @@ LifeWiki 的 AI 分析采用 Agent 架构，将 AI 行为规范固化到配置�
 # LifeWiki 知识库规范
 
 ## 目录结构
-- People/ - 人脉实体
-- Projects/ - 项目和任务
-- Things/ - 物品/工具
-- Ideas/ - 想法/观点
-- Knowledge/ - 知识/文档
+
+### Vault 目录
+
+```
+Vault/
+├── .obsidian/
+│   └── plugins/lifewiki/           # 插件代码
+│
+├── .lifewiki/                       # LifeWiki 数据（隐藏）
+│   ├── agent/                       # AI Agent 配置
+│   │   ├── IDENTITY.md
+│   │   ├── SOUL.md
+│   │   ├── SKILL.md
+│   │   ├── MEMORY.md
+│   │   └── WIKI.md
+│   ├── sessions/                    # AI 会话历史
+│   │   └── {blockId}.json
+│   └── templates/                   # 内置模板
+│       ├── journal-template.md
+│       ├── person-template.md
+│       ├── project-template.md
+│       ├── task-template.md
+│       ├── thing-template.md
+│       ├── idea-template.md
+│       └── knowledge-template.md
+│
+├── templates/                      # 用户自定义模板（可选）
+│
+├── Daily/                         # 日记文件
+├── People/                        # 人脉实体
+├── Projects/                      # 项目和任务
+├── Things/                        # 物品/工具
+├── Ideas/                         # 想法/观点
+└── Knowledge/                     # 知识/文档
+```
 
 ## 命名规范
 | 类型 | 命名规范 | 示例 |
@@ -341,18 +371,39 @@ AI 分析请求
 
 #### 2.5.8 配置文件的热更新
 
-配置文件存放于插件数据目录下的 `.lifewiki/agent/` 目录：
+配置文件存放于 Vault 的 `.lifewiki/agent/` 目录：
 
 ```
-{lifewiki_data_path}/.lifewiki/agent/
-├── IDENTITY.md
-├── SOUL.md
-├── SKILL.md
-├── MEMORY.md
-└── WIKI.md
+Vault/.lifewiki/agent/
+├── IDENTITY.md    # 身份定义
+├── SOUL.md        # 分析策略和对话规范
+├── SKILL.md       # 函数定义
+├── MEMORY.md      # 上下文模板
+└── WIKI.md        # 知识库结构
 ```
 
 修改配置文件后，AI Agent 的行为会相应更新，无需修改代码。
+
+#### 2.5.9 模板系统
+
+内置模板存放于 Vault 的 `.lifewiki/templates/` 目录：
+
+```
+Vault/.lifewiki/templates/
+├── journal-template.md       # 日记模板
+├── person-template.md        # 人脉模板
+├── project-template.md       # 项目模板
+├── task-template.md          # 任务模板
+├── thing-template.md         # 物品模板
+├── idea-template.md          # 想法模板
+└── knowledge-template.md     # 知识模板
+```
+
+**模板加载优先级：**
+1. `Vault/templates/` - 用户自定义覆盖（如果存在同名文件）
+2. `Vault/.lifewiki/templates/` - 内置默认模板
+
+用户想自定义模板时，可在 Vault 根目录创建 `templates/` 目录，放入同名模板文件即可覆盖内置版本。
 
 ### 2.6 Vault 操作
 
@@ -756,10 +807,12 @@ AI 分析日记，识别人脉实体
 ```
 Vault/
 └── .lifewiki/                    # LifeWiki 私有数据（隐藏）
-    └── sessions/                  # Per-block 会话目录
-        ├── {blockId-1}.json      # Block 1 的会话
-        ├── {blockId-2}.json      # Block 2 的会话
-        └── {blockId-N}.json      # Block N 的会话
+    ├── agent/                     # AI Agent 配置
+    ├── sessions/                  # Per-block 会话目录
+    │   ├── {blockId-1}.json      # Block 1 的会话
+    │   ├── {blockId-2}.json      # Block 2 的会话
+    │   └── {blockId-N}.json      # Block N 的会话
+    └── templates/                 # 内置模板
 ```
 
 #### 3.2.4.3 会话数据结构
@@ -973,11 +1026,13 @@ LangGraph Agent 内部也会调用 SessionManager 保存消息，确保 SessionM
 
 ### 3.2.5 AI 分析面板 UI
 
-右侧 AI 分析面板的输入区设计：
+右侧 AI 分析面板支持两种模式：**分析模式**和**聊天模式**。
+
+#### 3.2.5.1 分析模式
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│ 🔍 AI洞察                                              │
+│  AI 洞察                                              │
 ├─────────────────────────────────────────────────────────┤
 │                                                         │
 │  你提到的 **张三**、**李四**                           │
@@ -993,38 +1048,70 @@ LangGraph Agent 内部也会调用 SessionManager 保存消息，确保 SessionM
 ├─────────────────────────────────────────────────────────┤
 │                                                         │
 │  ┌───────────────────────────┐    ⬆                   │
-│  │ MiniMax              ▼  │    │ ← 发送箭头          │
-│  └───────────────────────────┘    │   (有文字时深色)    │
-│  ↑ 模型选择器                        │                   │
-│  (左下角)                                               │
+│  │ 输入你的回复...            │    │                   │
+│  └───────────────────────────┘    │   发送箭头          │
+│                                    │   (有文字时深色)    │
+│  [聊天]                            │                   │
 │                                                         │
 └─────────────────────────────────────────────────────────┘
 ```
 
-**输入区布局**：
+**分析模式特点**：
+- 标题显示"AI 洞察"
+- 右上角无按钮
+- 输入框 placeholder："输入你的回复..."
+- 底部输入框左侧显示"聊天"按钮，点击切换到聊天模式
+
+#### 3.2.5.2 聊天模式
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                                                                 │
-│  输入框（多行textarea）                                         │
-│                                                                 │
-│                                                                 │
-│  ┌───────────────────────────┐              ┌────┐              │
-│  │ MiniMax              ▼  │              │ →  │              │
-│  └───────────────────────────┘              └────┘              │
-│  ↑ 模型选择器（左下角）                          ↑ 发送箭头        │
-│                                                  （右下角）       │
-└─────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────┐
+│  AI 聊天                                        [🗑️]  │
+├─────────────────────────────────────────────────────────┤
+│                                                         │
+│  帮我复盘一下今天的日记                                   │
+│                                                         │
+│  ┌─────────────────────────────────────────────────┐   │
+│  | 今天的主要收获是...                                |   │
+│  └─────────────────────────────────────────────────┘   │
+│                                                         │
+│  [继续对话...]                                          │
+│                                                         │
+├─────────────────────────────────────────────────────────┤
+│                                                         │
+│  ┌───────────────────────────┐    ⬆                   │
+│  │ 说点什么...               │    │                   │
+│  └───────────────────────────┘    │   发送箭头          │
+│                                    │   (有文字时深色)    │
+│  [聊天] [分析]                                       │
+│                                                         │
+└─────────────────────────────────────────────────────────┘
 ```
 
-**交互规则**：
+**聊天模式特点**：
+- 标题显示"AI 聊天"
+- 右上角显示"🗑️清空"按钮，点击清空聊天上下文
+- 输入框 placeholder："说点什么..."
+- 底部输入框左侧显示"聊天"和"分析"两个按钮，点击"分析"切换回分析模式
 
-| 元素 | 行为 |
+#### 3.2.5.3 模式切换规则
+
+| 触发 | 动作 |
 |------|------|
-| 模型选择器 | 左下角，点击展开选择当前对话使用的 AI 模型 |
-| 发送箭头 | 右下角，有输入时深色(可点击)，无输入时灰色(不可点击) |
-| Enter 键 | 发送消息，Shift+Enter 换行 |
-| 无发送按钮 | 不显示"发送"文字按钮 |
+| 点击 block | 自动切换到分析模式 |
+| 点击日记输入框 | 自动切换到分析模式 |
+| 点击底部"聊天"按钮 | 切换到聊天模式 |
+| 点击底部"分析"按钮 | 切换到分析模式 |
+| 点击右上角"🗑️" | 清空聊天上下文（仅聊天模式） |
+
+#### 3.2.5.4 Session 管理
+
+| 模式 | Session Key | 说明 |
+|------|-------------|------|
+| 分析模式 | `block:{blockId}` | 绑定到具体 block |
+| 聊天模式 | `chat:global` | 全局通用聊天 session |
+
+聊天模式下，AI 支持调用 `get_diary_entries` 等工具获取日记内容进行复盘等操作。
 
 ### 3.3 实体分类与元数据
 
@@ -1601,9 +1688,323 @@ this.vault.on('modify', (file) => {
 });
 ```
 
+### 5.4 CSS 样式加载策略
+
+**问题背景**：
+Obsidian v1.12+ (Electron v39 / Chromium 139) 对插件 CSS 加载有更严格的资源隔离策略：
+- Shadow DOM 广泛应用于表格、Canvas、Block 编辑器
+- 全局 CSS（main.css）可能被安全策略拦截或被 Shadow DOM 隔离
+- `manifest.json` 中声明的 `styles` 字段可能无法正常加载
+
+**解决方案**：
+采用 JavaScript 动态注入 `<style>` 元素方式，在组件的 `addStyles()` 方法中创建并追加样式：
+
+```typescript
+private addStyles() {
+    const styleEl = document.createElement('style');
+    styleEl.textContent = `
+        .lifewiki-ai-panel {
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            background: var(--surface-container-low);
+            /* ... 其他样式 */
+        }
+    `;
+    this.containerEl.appendChild(styleEl);
+}
+```
+
+**优势**：
+- 绕过 Obsidian CSS 加载机制，100% 可靠
+- 直接注入到组件容器，不受 Shadow DOM 影响
+- 优先级高于外部 CSS 和第三方主题覆盖
+
+**适用场景**：
+- AI 分析面板（`ai-analysis-panel.ts`）
+- 日记编辑器（`block-editor.ts`）
+
+**注意**：
+- 所有 UI 组件样式均通过 `addStyles()` 动态注入
+- `main.css` 文件保留作为样式文档参考，不依赖其被加载
+- 当前方案为固定外观设计，不随 Obsidian 主题切换变化
+
 ---
 
-## 6. 风险与对策
+---
+
+## 6. V1.1 功能规划：多 Agent 架构 + 自定义 Provider
+
+### 6.1 背景与目标
+
+当前 V0.1 使用单一 `LangGraphAgent` 处理所有模式（分析/聊天），通过 `blockId` 硬编码判断。V1.1 重构为多 Agent 架构，支持：
+
+- **多 Agent 专业分工**：Diary Agent（分析）、Chat Agent（聊天）
+- **自定义 AI Provider**：支持 OpenAI、Anthropic、自定义 Endpoint
+- **Agent-Provider 映射**：不同 Agent 可使用不同 AI 服务
+- **配置驱动**：Agent 行为由配置文件定义，易于扩展
+
+### 6.2 目标架构
+
+```
+.lifewiki/agents/                    # Agent 配置
+├── diary/                           # 日记分析 Agent
+│   ├── IDENTITY.md                 # 身份定义
+│   ├── SOUL.md                     # 分析规范
+│   ├── SKILL.md                    # 技能定义
+│   └── WIKI.md                     # 知识库规范
+└── chat/                           # 聊天 Agent
+    ├── IDENTITY.md
+    ├── SOUL.md
+    └── SKILL.md
+
+src/ai/
+├── providers/                       # AI Provider 相关
+│   ├── interfaces.ts               # Provider 接口
+│   ├── provider-manager.ts         # Provider 管理器
+│   ├── openai-provider.ts          # OpenAI 实现
+│   ├── anthropic-provider.ts       # Anthropic 实现
+│   └── custom-provider.ts          # 自定义 Provider 实现
+├── agents/                         # Agent 相关
+│   ├── interfaces.ts               # Agent 接口
+│   ├── base-agent.ts              # 抽象类
+│   ├── agent-registry.ts          # Agent 注册表
+│   ├── diary-agent.ts              # 日记分析 Agent
+│   └── chat-agent.ts               # 聊天 Agent
+└── main.ts                        # 入口（修改）
+```
+
+### 6.3 核心接口设计
+
+#### 6.3.1 Provider 接口
+
+```typescript
+// src/ai/providers/interfaces.ts
+export interface AIProvider {
+  readonly id: string;
+  readonly name: string;
+  readonly type: 'openai' | 'anthropic' | 'custom';
+
+  chat(messages: ChatMessage[]): Promise<ChatResponse>;
+  isReady(): boolean;
+}
+
+export interface ChatMessage {
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+}
+
+export interface ChatResponse {
+  content: string;
+  usage?: {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+  };
+}
+```
+
+#### 6.3.2 自定义 Provider 配置
+
+```typescript
+// src/ai/providers/types.ts
+export interface CustomProviderConfig {
+  id: string;
+  name: string;
+  type: 'custom';
+  endpoint: string;           // API Endpoint URL
+  apiKey?: string;            // API Key (加密存储)
+  model: string;              // 模型名称
+  extraParams?: Record<string, any>;
+}
+
+export interface ProviderSettings {
+  defaultProvider: string;
+  providers: (PresetProviderConfig | CustomProviderConfig)[];
+}
+```
+
+#### 6.3.3 Agent 接口
+
+```typescript
+// src/ai/agents/interfaces.ts
+export interface AgentContext {
+  blockId: string;
+  content?: string;
+  parentId?: string | null;
+  siblingBlocks?: Array<{ id: string; content: string }>;
+}
+
+export interface AgentResult {
+  response: string;
+  session: BlockSession;
+  entities?: DiscoveredEntity[];
+  error?: string;
+}
+
+export interface Agent {
+  readonly id: string;
+  readonly name: string;
+
+  initialize(): Promise<void>;
+  start(ctx: AgentContext): Promise<AgentResult>;
+  continue(ctx: AgentContext, message: string): Promise<AgentResult>;
+}
+```
+
+#### 6.3.4 Agent 注册表
+
+```typescript
+// src/ai/agents/agent-registry.ts
+export class AgentRegistry {
+  private agents: Map<string, Agent> = new Map();
+  private providerManager: ProviderManager;
+
+  constructor(providerManager: ProviderManager) {
+    this.providerManager = providerManager;
+  }
+
+  registerAgent(agent: Agent): void;
+  getAgent(id: string): Agent | undefined;
+  resolveAgent(blockId: string): Agent {
+    // chat:global → Chat Agent
+    // block:* → Diary Agent
+  }
+}
+```
+
+### 6.4 工具集对比
+
+| 工具 | Diary Agent | Chat Agent |
+|------|-------------|------------|
+| search_entity | ✓ | ✓ |
+| create_entity | ✓ | ✗ |
+| add_interaction | ✓ | ✗ |
+| list_entities | ✓ | ✓ |
+| link_entities | ✓ | ✗ |
+| get_diary_entries | ✗ | ✓ |
+| get_entity_history | ✓ | ✓ |
+
+### 6.5 设置页面设计
+
+```
+┌──────────────────────────────────────────────────────────┐
+│ ⚙️ LifeWiki 设置                                          │
+├──────────────────────────────────────────────────────────┤
+│                                                          │
+│  ┌────────────────────────────────────────────────────┐ │
+│  │ 🤖 AI Provider 设置                                 │ │
+│  ├────────────────────────────────────────────────────┤ │
+│  │                                                     │ │
+│  │ 默认 Provider: [OpenAI                        ▼]  │ │
+│  │                                                     │ │
+│  │ ┌─ OpenAI ──────────────────────────────────────┐ │ │
+│  │ │ Endpoint: https://api.openai.com/v1         │ │ │
+│  │ │ API Key:  [••••••••••••••••••••••••]       │ │ │
+│  │ │ Model:    [gpt-4o                          ▼] │ │ │
+│  │ └───────────────────────────────────────────────┘ │ │
+│  │                                                     │ │
+│  │ ┌─ Anthropic ──────────────────────────────────┐ │ │
+│  │ │ Endpoint: https://api.anthropic.com         │ │ │
+│  │ │ API Key:  [••••••••••••••••••••••••]       │ │ │
+│  │ │ Model:    [claude-3-5-sonnet-20241022  ▼]   │ │ │
+│  │ └───────────────────────────────────────────────┘ │ │
+│  │                                                     │ │
+│  │ ┌─ 自定义 #1 ───────────────────────────────────┐ │ │
+│  │ │ Name: [本地 Ollama            ]               │ │ │
+│  │ │ Endpoint: [http://localhost:11434/v1]        │ │ │
+│  │ │ API Key:  [                          ] (可选) │ │ │
+│  │ │ Model:    [llama3                       ]   │ │ │
+│  │ │ [删除]                                         │ │ │
+│  │ └───────────────────────────────────────────────┘ │ │
+│  │                                                     │ │
+│  │ [+ 添加自定义 Provider]                              │ │
+│  └────────────────────────────────────────────────────┘ │
+│                                                          │
+│  ┌────────────────────────────────────────────────────┐ │
+│  │ 📋 Agent 配置                                       │ │
+│  ├────────────────────────────────────────────────────┤ │
+│  │                                                     │ │
+│  │ [Diary Agent]        使用: [OpenAI           ▼]   │ │
+│  │ 分析日记、识别实体                                    │ │
+│  │                                                     │ │
+│  │ [Chat Agent]         使用: [Anthropic       ▼]   │ │
+│  │ 自由对话、日记总结                                    │ │
+│  └────────────────────────────────────────────────────┘ │
+│                                                          │
+└──────────────────────────────────────────────────────────┘
+```
+
+### 6.6 实施步骤
+
+#### Phase 0: 准备（功能开关）
+1. 梳理现有 `LangGraphAgent` 调用链
+2. 添加 `useNewAgentArchitecture` 功能开关
+
+#### Phase 1: Provider 基础架构
+1. 创建 Provider 接口 (`interfaces.ts`)
+2. 创建 ProviderManager (`provider-manager.ts`)
+3. 封装现有 Provider 为 `DefaultAIProvider`
+
+#### Phase 2: 自定义 Provider 支持
+1. 定义 `CustomProviderConfig` 类型
+2. 实现 `CustomProvider` 类
+3. ProviderManager 添加 `addCustomProvider()` 方法
+
+#### Phase 3: Agent 基础架构
+1. 定义 Agent 接口 (`interfaces.ts`)
+2. 创建 `BaseAgent` 抽象类
+3. 创建 `AgentRegistry` 注册表
+
+#### Phase 4: 实现 DiaryAgent
+1. 创建 `DiaryAgent` 类（复用现有 `BlockAnalysisMachine`）
+2. 注册到 AgentRegistry
+3. 验证分析功能正常
+
+#### Phase 5: 实现 ChatAgent
+1. 创建 `ChatAgent` 类
+2. 实现 `get_diary_entries` 工具
+3. 验证聊天模式正常
+
+#### Phase 6: 功能开关集成
+1. 修改 `AIAnalysisPanelView` 桥接层
+2. 添加功能开关到设置页面
+3. 验证两侧功能正常
+
+#### Phase 7: 设置页面 UI
+1. Provider 配置 UI
+2. 自定义 Provider 添加/编辑/删除
+3. Agent-Provider 映射 UI
+
+#### Phase 8: 清理（可选）
+1. 移除功能开关
+2. 删除旧架构代码
+
+### 6.7 验证清单
+
+| Step | 验证项 | 预期结果 |
+|------|--------|----------|
+| 0.2 | Plugin 加载 | 无错误 |
+| 1.1-1.3 | ProviderManager 构建 | `npm run build` 通过 |
+| 2.1-2.3 | 自定义 Provider | 可调用自定义 endpoint |
+| 3.1-3.3 | Agent 接口定义 | 代码编译通过 |
+| 4.1-4.3 | DiaryAgent | 分析功能正常 |
+| 5.1-5.3 | ChatAgent | 聊天模式正常 |
+| 6.1-6.3 | 功能开关 | 两侧功能正常 |
+| 7.1-7.3 | Provider UI | 可配置 Provider |
+| 8.1-8.3 | Agent-Provider 映射 | 可为不同 Agent 选择不同 Provider |
+
+### 6.8 风险与缓解
+
+| 风险 | 级别 | 缓解措施 |
+|------|------|----------|
+| 重构破坏现有功能 | 中 | 功能开关保护，随时可回滚 |
+| Provider 配置复杂 | 低 | 先实现预设 Provider，再实现自定义 |
+| Agent 间状态冲突 | 低 | SessionManager 按 blockId 隔离 |
+
+---
+
+## 7. 风险与对策
 
 | 风险 | 影响 | 对策 |
 |------|------|------|
@@ -1614,31 +2015,35 @@ this.vault.on('modify', (file) => {
 
 ---
 
-## 7. 未来演进
+## 8. 未来演进
 
-### 7.1 搜索优化路径
+### 8.1 搜索优化路径
 
 ```
 V1.0: Obsidian 内置搜索
   ↓
-V1.1: SQLite FTS5 索引（别名、标签优先）
+V1.1: 多 Agent 架构 + 自定义 Provider
   ↓
-V2.0: 向量嵌入语义搜索（Ollama 本地模型）
+V2.0: SQLite FTS5 索引（别名、标签优先）
+  ↓
+V3.0: 向量嵌入语义搜索（Ollama 本地模型）
 ```
 
-### 7.2 Agent 集成深化
+### 8.2 Agent 集成深化
 
 ```
 V1.0: Skill HTTP 接口
   ↓
-V1.1: 双向读写、上下文注入
+V1.1: 多 Agent 架构 + 自定义 Provider
   ↓
-V2.0: OpenClaw Native Memory Adapter
+V2.0: 双向读写、上下文注入
+  ↓
+V3.0: OpenClaw Native Memory Adapter
 ```
 
 ---
 
-## 8. 附录
+## 9. 附录
 
 ### 8.1 参考模板
 

@@ -129,3 +129,18 @@ export interface BlockSession {
 	updatedAt: string;       // ISO 8601
 	currentPhase: AnalysisPhase;
 }
+
+/**
+ * Panel mode for AI analysis panel
+ */
+export type PanelMode = 'analysis' | 'chat';
+
+/**
+ * Chat session for free-form conversation
+ */
+export interface ChatSession {
+	blockId: string;  // Always 'chat:global'
+	messages: ChatMessage[];
+	createdAt: string;
+	updatedAt: string;
+}

@@ -4,12 +4,14 @@
  */
 
 import { App, TFile } from 'obsidian';
-import { BlockSession, AnalysisPhase, ChatMessage, AnalysisResult } from '../entities/types';
+import { BlockSession, AnalysisPhase, ChatMessage, AnalysisResult, ChatSession } from '../entities/types';
 
 const SESSIONS_FOLDER = '.lifewiki/sessions';
+const CHAT_SESSION_KEY = 'chat:global';
 
 export class SessionManager {
 	private sessions: Map<string, BlockSession> = new Map();
+	private chatSession: ChatSession | null = null;
 	private activeBlockId: string | null = null;
 	private app: App;
 	private saveDebounceTimer: NodeJS.Timeout | null = null;
@@ -256,5 +258,45 @@ export class SessionManager {
 	 */
 	getAllSessionIds(): string[] {
 		return Array.from(this.sessions.keys());
+	}
+
+	/**
+	 * Get or create chat session
+	 */
+	getOrCreateChatSession(): ChatSession {
+		if (!this.chatSession) {
+			const now = new Date().toISOString();
+			this.chatSession = {
+				blockId: CHAT_SESSION_KEY,
+				messages: [],
+				createdAt: now,
+				updatedAt: now
+			};
+		}
+		return this.chatSession;
+	}
+
+	/**
+	 * Get chat session
+	 */
+	getChatSession(): ChatSession | null {
+		return this.chatSession;
+	}
+
+	/**
+	 * Add message to chat session
+	 */
+	addChatMessage(message: ChatMessage): ChatSession | undefined {
+		const session = this.getOrCreateChatSession();
+		session.messages.push(message);
+		session.updatedAt = new Date().toISOString();
+		return session;
+	}
+
+	/**
+	 * Clear chat session
+	 */
+	clearChatSession(): void {
+		this.chatSession = null;
 	}
 }

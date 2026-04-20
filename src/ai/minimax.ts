@@ -71,7 +71,7 @@ export class MiniMaxProvider {
         content: m.content
       })),
       temperature: 0.7,
-      max_tokens: 500
+      max_tokens: 2048
     };
 
     try {
