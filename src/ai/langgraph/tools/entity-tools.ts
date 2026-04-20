@@ -536,80 +536,124 @@ export class EntityTools {
 	 */
 	async readLocalDocument(input: ReadLocalDocumentInput): Promise<ToolExecutionResult> {
 		try {
-			// Path validation for security
+			// Path validation for security - no path traversal
 			if (!this.isValidLocalPath(input.path)) {
-				return { success: false, error: 'Invalid path: must be an absolute path and cannot contain ".." or "~"' };
+				return { success: false, error: 'Invalid path: must be an absolute path and cannot contain ".."' };
 			}
 
-			// Expand ~ to home directory
-			let filePath = input.path;
-			if (filePath.startsWith('~/')) {
-				filePath = filePath.replace('~', process.env.HOME || '');
+			// Normalize path: expand ~ to home directory
+			let normalizedPath = input.path;
+			if (normalizedPath.startsWith('~/')) {
+				const os = require('os');
+				normalizedPath = normalizedPath.replace('~', os.homedir());
 			}
 
-			// Use dynamic import for Node.js fs module (browser context won't have it)
-			const fs = await import('fs/promises');
-			const pathModule = await import('path');
+			// Try to use Obsidian's vault API if app is available
+			if (this.app) {
+				const vaultAdapter = this.app.vault.adapter;
+				let vaultBasePath: string;
 
-			// Check if file exists
-			try {
-				await fs.access(filePath);
-			} catch {
-				return { success: false, error: `File not found: ${input.path}` };
-			}
+				// Get vault base path
+				if (typeof vaultAdapter.getBasePath === 'function') {
+					vaultBasePath = vaultAdapter.getBasePath();
+				} else if (typeof vaultAdapter.basePath === 'string') {
+					vaultBasePath = vaultAdapter.basePath;
+				} else {
+					vaultBasePath = this.app.vault.path;
+				}
 
-			// Read file content
-			const content = await fs.readFile(filePath, 'utf-8');
+				// Check if the file is inside the vault
+				if (normalizedPath.startsWith(vaultBasePath)) {
+					const relativePath = normalizedPath.substring(vaultBasePath.length + 1);
+					const file = this.app.vault.getAbstractFileByPath(relativePath);
 
-			// Check file size (limit to 100KB)
-			const contentLength = Buffer.byteLength(content, 'utf-8');
-			if (contentLength > 100 * 1024) {
-				return { success: false, error: 'File too large: maximum size is 100KB' };
-			}
-
-			// Extract frontmatter if present
-			const frontmatter: Record<string, any> = {};
-			let bodyContent = content;
-
-			const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
-			if (frontmatterMatch) {
-				const frontmatterStr = frontmatterMatch[1];
-				bodyContent = frontmatterMatch[2];
-
-				// Parse frontmatter lines
-				const lines = frontmatterStr.split('\n');
-				for (const line of lines) {
-					const colonIndex = line.indexOf(':');
-					if (colonIndex > 0) {
-						const key = line.substring(0, colonIndex).trim();
-						let value: any = line.substring(colonIndex + 1).trim();
-
-						// Parse arrays like [tag1, tag2]
-						if (value.startsWith('[') && value.endsWith(']')) {
-							value = value.slice(1, -1).split(',').map(v => v.trim().replace(/['"]/g, ''));
-						}
-						frontmatter[key] = value;
+					if (file && file instanceof TFile) {
+						const fileContent = await this.app.vault.read(file);
+						return this.parseDocumentContent(fileContent, input.path);
 					}
 				}
 			}
 
-			// Extract title from first heading or filename
-			const titleMatch = bodyContent.match(/^#\s+(.+)$/m);
-			const title = titleMatch ? titleMatch[1] : pathModule.basename(filePath, '.md');
+			return { success: false, error: 'File is not inside the Obsidian vault or vault API is not available' };
+		} catch (error) {
+			return { success: false, error: `Read local document failed: ${error instanceof Error ? error.message : String(error)}` };
+		}
+	}
+
+	/**
+	 * Parse document content and extract frontmatter
+	 */
+	private parseDocumentContent(content: string, filePath: string): ToolExecutionResult {
+		// Check file size (limit to 100KB)
+		const contentLength = Buffer.byteLength(content, 'utf-8');
+		if (contentLength > 100 * 1024) {
+			return { success: false, error: 'File too large: maximum size is 100KB' };
+		}
+
+		// Extract frontmatter if present
+		const frontmatter: Record<string, any> = {};
+		let bodyContent = content;
+
+		const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
+		if (frontmatterMatch) {
+			const frontmatterStr = frontmatterMatch[1];
+			bodyContent = frontmatterMatch[2];
+
+			// Parse frontmatter lines
+			const lines = frontmatterStr.split('\n');
+			for (const line of lines) {
+				const colonIndex = line.indexOf(':');
+				if (colonIndex > 0) {
+					const key = line.substring(0, colonIndex).trim();
+					let value: any = line.substring(colonIndex + 1).trim();
+					// Handle arrays like [tag1, tag2]
+					if (value.startsWith('[') && value.endsWith(']')) {
+						value = value.slice(1, -1).split(',').map((s: string) => s.trim().replace(/['"]/g, ''));
+					}
+					frontmatter[key] = value;
+				}
+			}
+		}
+
+		// Extract title from first H1 heading if present
+		let title = frontmatter.title || '';
+		if (!title) {
+			const h1Match = bodyContent.match(/^#\s+(.+)$/m);
+			if (h1Match) {
+				title = h1Match[1];
+			}
+		}
+
+		// Extract filename as fallback title
+		if (!title) {
+			const filenameMatch = filePath.match(/\/([^/]+)\.md$/);
+			if (filenameMatch) {
+				title = filenameMatch[1];
+			}
+		}
+
+		// Limit content to 20KB to prevent LLM overload
+			const MAX_CONTENT_SIZE = 20 * 1024;
+			let truncatedContent = bodyContent.trim();
+			if (truncatedContent.length > MAX_CONTENT_SIZE) {
+				truncatedContent = truncatedContent.substring(0, MAX_CONTENT_SIZE);
+				truncatedContent += '\n\n[内容已截断，原文档过长]';
+			}
 
 			return {
-				success: true,
-				data: {
-					path: input.path,
-					title,
-					content: bodyContent.trim(),
-					frontmatter,
-					extractedAt: new Date().toISOString()
+			success: true,
+			data: {
+				content: truncatedContent,
+				metadata: {
+					title: title,
+					tags: frontmatter.tags || [],
+					uid: frontmatter.uid,
+					frontmatter: frontmatter,
+					originalLength: bodyContent.trim().length,
+					wasTruncated: truncatedContent !== bodyContent.trim()
 				}
-			};
-		} catch (error) {
-			return { success: false, error: `Read local document failed: ${(error as Error).message}` };
-		}
+			}
+		};
 	}
 
 	/**

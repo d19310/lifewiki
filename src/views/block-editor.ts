@@ -99,7 +99,18 @@ export class BlockEditorView extends ItemView {
 		return 'LifeWiki';
 	}
 
-	async onOpen() {
+	/**
+	 * Set the current date and navigate to that date's diary
+	 */
+	async setCurrentDate(date: Date): Promise<void> {
+		this.currentDate = this.formatDate(date);
+		await this.renderView();
+	}
+
+	/**
+	 * Render the view (used by both onOpen and setCurrentDate)
+	 */
+	private async renderView(): Promise<void> {
 		const container = this.containerEl;
 		container.empty();
 
@@ -165,6 +176,10 @@ export class BlockEditorView extends ItemView {
 				aiView?.clearConversation();
 			}
 		});
+	}
+
+	async onOpen() {
+		await this.renderView();
 	}
 
 	private addStyles() {
@@ -2054,7 +2069,10 @@ export class BlockEditorView extends ItemView {
 	}
 
 	private formatDate(date: Date): string {
-		return date.toISOString().split('T')[0];
+		const year = date.getFullYear();
+		const month = String(date.getMonth() + 1).padStart(2, '0');
+		const day = String(date.getDate()).padStart(2, '0');
+		return `${year}-${month}-${day}`;
 	}
 
 	async onClose() {

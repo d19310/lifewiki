@@ -1,4 +1,4 @@
-# LifeWiki 产品规格文档 V1.1
+# LifeWiki 产品规格文档 V1.2
 
 ## 1. 产品概述
 
@@ -1647,13 +1647,103 @@ interface LifeWikiSettings {
 
 ### 5.2 后续版本 (V1.1+)
 
-- [ ] Things 物品类别
-- [ ] Ideas 想法类别
+- [x] Things 物品类别
+- [x] Ideas 想法类别
 - [ ] Claude Provider 支持
 - [ ] 探索模式
 - [ ] 每日复盘报告生成
 
-### 5.3 后续版本 (V2.0+)
+### 5.3 V1.2 新增功能
+
+#### 5.3.1 本地 .md 文档识别与归档
+
+**功能描述**：
+当用户在日记中提及本地 .md 文件路径时，AI 能够识别并读取该文件内容，根据内容类型自动识别实体类型（人物/项目/物品/想法/知识），然后引导用户确认是否归档为实体。
+
+**使用场景**：
+- 用户在日记中提及：`今天看了 ~/Documents/读书笔记/认知心理学.md`
+- AI 识别到本地路径，读取文件内容
+- 分析内容类型，识别人物/项目/知识等
+- 询问用户：「检测到您阅读了认知心理学相关文档，要归档为知识吗？」
+
+**技术实现**：
+
+| 组件 | 文件 | 功能 |
+|------|------|------|
+| `read_local_document` 工具 | `entity-tools.ts` | 读取本地 .md 文件，支持 ~ 路径扩展 |
+| `summarize_document` 工具 | `entity-tools.ts` | 根据实体类型提取关键信息 |
+| 路径安全验证 | `isValidLocalPath()` | 防止路径遍历攻击 |
+| Frontmatter 解析 | - | 提取 YAML 元数据 |
+
+**工具定义**：
+
+```
+read_local_document(path: string, options?: { maxLines?: number })
+  → { content: string, metadata: { title?, tags?, uid? }, success: boolean, error?: string }
+
+summarize_document(path: string, entityType: EntityType)
+  → { summary: string, keyInfo: Record<string, any>, suggestedMetadata: object }
+```
+
+**安全限制**：
+- 仅允许读取 `~` 开头的绝对路径
+- 限制读取文件大小（最大 100KB）
+- 防止 `../` 路径遍历
+
+#### 5.3.2 日历视图
+
+**功能描述**：
+在 Obsidian 右侧边栏显示日历视图，支持月份导航，点击日期可直接跳转到对应日期的日记。
+
+**产品形态**：
+- 独立 Tab，与 AI 分析面板并列
+- 顶部：月份导航（‹ 上月 | 2026年4月 | 下月 ›）
+- 点击月份标题回到今天
+- 主体：6×7 日历网格
+- 日期圆点标记：该日有日记
+
+**交互逻辑**：
+
+| 操作 | 行为 |
+|------|------|
+| 点击日期 | 打开 BlockEditor 并加载该日期日记 |
+| 点击月份标题 | 回到当月 |
+| 点击 ‹ › | 导航上一月/下一月 |
+| 日记存在 | 日期右下角显示蓝点 |
+
+**技术实现**：
+
+| 组件 | 文件 | 功能 |
+|------|------|------|
+| CalendarView | `calendar-view.ts` | ItemView 子类，渲染日历 UI |
+| getMonthDays() | `calendar-view.ts` | 计算 42 天日历网格 |
+| diaryExistsForDate() | `calendar-view.ts` | 检查 Daily/YYYY-MM-DD.md 是否存在 |
+| setOnDateClick() | `calendar-view.ts` | 日期点击回调 |
+| setCurrentDate() | `block-editor.ts` | 导航到指定日期 |
+| navigateToDate() | `main.ts` | 协调日历点击→日记导航 |
+
+**UI 布局**：
+
+```
+┌─────────────────────────────────────────┐
+│  日历视图                          □ × │
+├─────────────────────────────────────────┤
+│      ‹   2026年4月   ›                   │
+│  日  一  二  三  四  五  六              │
+│                          1  2  3  4      │
+│   5  6  7  8  9 10 11  •                │
+│  12 13 14 15 16 17 18                   │
+│  19 20 21 22 23 24 25  •                │
+│  26 27 28 29 30                          │
+└─────────────────────────────────────────┘
+         • = 该日有日记
+```
+
+**打开方式**：
+- Ribbon 图标（日历图标）
+- 命令面板：`Open Calendar`
+
+### 5.4 后续版本 (V2.0+)
 
 - [ ] 向量语义搜索
 - [ ] Agent Skill HTTP 接口（供外部调用）
@@ -1662,9 +1752,9 @@ interface LifeWikiSettings {
 
 ---
 
-## 5. 技术实现
+## 6. 技术实现
 
-### 5.1 技术栈
+### 6.1 技术栈
 
 - **插件框架**：Obsidian API (TypeScript)
 - **AI 接入**：OpenClaw diaryagent (WebSocket) + 可配置其他 Provider
@@ -1672,14 +1762,14 @@ interface LifeWikiSettings {
 - **本地 Server**：Express.js / Hono.js（Node.js child process）
 - **实体索引**：SQLite FTS5（可选升级）
 
-### 5.2 Vault 同步策略
+### 6.2 Vault 同步策略
 
 用户自行选择同步方式：
 - **iCloud/OneDrive**：原生支持
 - **Syncthing**：跨设备同步
 - **Git**：通过 obsidian-git 插件
 
-### 5.3 文件变化监听
+### 6.3 文件变化监听
 
 ```typescript
 // Obsidian API
@@ -1688,7 +1778,7 @@ this.vault.on('modify', (file) => {
 });
 ```
 
-### 5.4 CSS 样式加载策略
+### 6.4 CSS 样式加载策略
 
 **问题背景**：
 Obsidian v1.12+ (Electron v39 / Chromium 139) 对插件 CSS 加载有更严格的资源隔离策略：
@@ -1733,9 +1823,9 @@ private addStyles() {
 
 ---
 
-## 6. V1.1 功能规划：多 Agent 架构 + 自定义 Provider
+## 7. V1.1 功能规划：多 Agent 架构 + 自定义 Provider
 
-### 6.1 背景与目标
+### 7.1 背景与目标
 
 当前 V0.1 使用单一 `LangGraphAgent` 处理所有模式（分析/聊天），通过 `blockId` 硬编码判断。V1.1 重构为多 Agent 架构，支持：
 
@@ -1744,7 +1834,7 @@ private addStyles() {
 - **Agent-Provider 映射**：不同 Agent 可使用不同 AI 服务
 - **配置驱动**：Agent 行为由配置文件定义，易于扩展
 
-### 6.2 目标架构
+### 7.2 目标架构
 
 ```
 .lifewiki/agents/                    # Agent 配置
@@ -1774,7 +1864,7 @@ src/ai/
 └── main.ts                        # 入口（修改）
 ```
 
-### 6.3 核心接口设计
+### 7.3 核心接口设计
 
 #### 6.3.1 Provider 接口
 
@@ -1873,7 +1963,7 @@ export class AgentRegistry {
 }
 ```
 
-### 6.4 工具集对比
+### 7.4 工具集对比
 
 | 工具 | Diary Agent | Chat Agent |
 |------|-------------|------------|
@@ -1885,7 +1975,7 @@ export class AgentRegistry {
 | get_diary_entries | ✗ | ✓ |
 | get_entity_history | ✓ | ✓ |
 
-### 6.5 设置页面设计
+### 7.5 设置页面设计
 
 ```
 ┌──────────────────────────────────────────────────────────┐
@@ -1935,7 +2025,7 @@ export class AgentRegistry {
 └──────────────────────────────────────────────────────────┘
 ```
 
-### 6.6 实施步骤
+### 7.6 实施步骤
 
 #### Phase 0: 准备（功能开关）
 1. 梳理现有 `LangGraphAgent` 调用链
@@ -1980,7 +2070,7 @@ export class AgentRegistry {
 1. 移除功能开关
 2. 删除旧架构代码
 
-### 6.7 验证清单
+### 7.7 验证清单
 
 | Step | 验证项 | 预期结果 |
 |------|--------|----------|
@@ -1994,7 +2084,7 @@ export class AgentRegistry {
 | 7.1-7.3 | Provider UI | 可配置 Provider |
 | 8.1-8.3 | Agent-Provider 映射 | 可为不同 Agent 选择不同 Provider |
 
-### 6.8 风险与缓解
+### 7.8 风险与缓解
 
 | 风险 | 级别 | 缓解措施 |
 |------|------|----------|
@@ -2004,7 +2094,7 @@ export class AgentRegistry {
 
 ---
 
-## 7. 风险与对策
+## 8. 风险与对策
 
 | 风险 | 影响 | 对策 |
 |------|------|------|
@@ -2015,7 +2105,7 @@ export class AgentRegistry {
 
 ---
 
-## 8. 未来演进
+## 9. 未来演进
 
 ### 8.1 搜索优化路径
 
@@ -2043,7 +2133,7 @@ V3.0: OpenClaw Native Memory Adapter
 
 ---
 
-## 9. 附录
+## 10. 附录
 
 ### 8.1 参考模板
 

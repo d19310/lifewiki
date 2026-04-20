@@ -6,6 +6,7 @@
 import { ItemView, WorkspaceLeaf, setIcon } from 'obsidian';
 import type LifeWikiPlugin from '../main';
 import { AnalysisResult, BlockSession, ChatMessage, PanelMode, ParsedBlock } from '../entities/types';
+import { BlockEditorView, VIEW_TYPE_BLOCK_EDITOR } from './block-editor';
 
 export const VIEW_TYPE_AI_ANALYSIS = 'lifewiki-ai-analysis';
 
@@ -1240,16 +1241,20 @@ export class AIAnalysisPanelView extends ItemView {
 	 */
 	private async updateBlockCategory(blockId: string, category: string): Promise<void> {
 		try {
-			const blockEditor = this.plugin.getBlockEditor();
-			if (!blockEditor) return;
+			// Get BlockEditorView from workspace
+			const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_BLOCK_EDITOR);
+			if (leaves.length === 0) return;
 
-			const block = blockEditor.getBlockById(blockId) as ParsedBlock | undefined;
+			const blockEditorView = leaves[0].view as BlockEditorView;
+			if (!blockEditorView) return;
+
+			const block = blockEditorView.getBlockById(blockId) as ParsedBlock | undefined;
 			if (!block) return;
 
 			// Only update if block is still in '待分析' state or already has a different category
 			if ((block as ParsedBlock).category === '待分析' || (block as ParsedBlock).category !== category) {
 				(block as ParsedBlock).category = category;
-				await blockEditor.saveBlockToFile(block as ParsedBlock);
+				await blockEditorView.saveBlockToFile(block as ParsedBlock);
 				console.log(`[AIAnalysisPanel] Updated block ${blockId} category to ${category}`);
 			}
 		} catch (error) {

@@ -20,6 +20,8 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # 解析参数
 VAULT_PATH=""
 SKIP_BUILD=false
+USE_BRAT=false
+GITHUB_REPO="d19310/lifewiki"
 
 usage() {
     echo "用法: $0 [选项]"
@@ -27,11 +29,15 @@ usage() {
     echo "选项:"
     echo "  -d, --directory <路径>      指定 vault 安装路径"
     echo "  -s, --skip-build            跳过 npm build (使用已编译的 main.js)"
+    echo "  -b, --brat                  使用 BRAT 从 GitHub 安装"
+    echo "  -r, --repo <repo>           GitHub 仓库地址 (默认: d19310/lifewiki)"
     echo "  -h, --help                  显示帮助"
     echo ""
     echo "示例:"
     echo "  $0                                    # 交互式选择安装路径"
     echo "  $0 -d \"/Users/me/docs/lifewiki\"       # 安装到指定路径"
+    echo "  $0 -b                                 # 使用 BRAT 从 GitHub 安装"
+    echo "  $0 -b -r \"username/lifewiki\"          # 从指定仓库安装"
     exit 1
 }
 
@@ -57,6 +63,14 @@ while [[ $# -gt 0 ]]; do
         -s|--skip-build)
             SKIP_BUILD=true
             shift
+            ;;
+        -b|--brat)
+            USE_BRAT=true
+            shift
+            ;;
+        -r|--repo)
+            GITHUB_REPO="$2"
+            shift 2
             ;;
         -h|--help)
             usage
@@ -360,6 +374,67 @@ install_plugin() {
     log_info "插件安装完成: ${PLUGIN_DIR}"
 }
 
+# 使用 BRAT 从 GitHub 安装插件
+install_brat() {
+    log_info "使用 BRAT 从 GitHub 安装 LifeWiki..."
+
+    # 检查 BRAT 是否安装
+    local brat_path="${VAULT_PATH}/.obsidian/plugins/obsidian42-brat"
+    if [ ! -d "$brat_path" ]; then
+        log_warn "BRAT 插件未安装，正在安装..."
+        
+        echo ""
+        echo "请在 Obsidian 中手动安装 BRAT 插件："
+        echo "1. 设置 → 社区插件 → 浏览"
+        echo "2. 搜索 'BRAT' 并安装"
+        echo "3. 安装完成后重新运行: $0 -b -d \"${VAULT_PATH}\""
+        echo ""
+        
+        read -p "是否现在打开 Obsidian 以安装 BRAT? (y/n) " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            open "$VAULT_PATH" -a Obsidian
+        fi
+        exit 0
+    fi
+
+    # 检查 vault 是否存在
+    if [ ! -d "$VAULT_PATH" ]; then
+        log_info "创建 Vault: ${VAULT_PATH}"
+        mkdir -p "$VAULT_PATH"
+        mkdir -p "${VAULT_PATH}/Daily"
+        mkdir -p "${VAULT_PATH}/.obsidian"
+        mkdir -p "${VAULT_PATH}/.lifewiki/agents"
+        mkdir -p "${VAULT_PATH}/.lifewiki/sessions"
+        mkdir -p "${VAULT_PATH}/.lifewiki/templates"
+    fi
+
+    # 创建 .obsidian/plugins 目录
+    mkdir -p "${VAULT_PATH}/.obsidian/plugins"
+
+    log_info "请按以下步骤操作："
+    echo ""
+    echo "========================================"
+    echo "       BRAT 安装步骤"
+    echo "========================================"
+    echo ""
+    echo "1. 在 Obsidian 中打开: ${VAULT_PATH}"
+    echo "2. 设置 → 社区插件 → BRAT → 打开设置"
+    echo "3. 点击 'Add a beta plugin from a GitHub repository'"
+    echo "4. 输入仓库地址: ${GITHUB_REPO}"
+    echo "5. 点击 'Add Plugin'"
+    echo "6. 返回社区插件列表，启用 LifeWiki"
+    echo ""
+    
+    read -p "是否现在打开 Obsidian? (y/n) " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        open "$VAULT_PATH" -a Obsidian
+    fi
+
+    log_info "BRAT 安装说明已提供"
+}
+
 # 启用插件
 enable_plugin() {
     log_info "插件已安装到 vault"
@@ -409,6 +484,13 @@ main() {
     echo "       LifeWiki 安装脚本"
     echo "========================================"
     echo ""
+
+    # 如果使用 BRAT 模式，跳过常规安装
+    if [ "$USE_BRAT" = true ]; then
+        ask_vault_path
+        install_brat
+        exit 0
+    fi
 
     check_system
     check_obsidian

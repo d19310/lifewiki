@@ -2,6 +2,7 @@ import { App, Notice, Plugin, PluginManifest } from 'obsidian';
 import { LifeWikiSettingTab, LifeWikiSettings, DEFAULT_SETTINGS, createAIProvider } from './settings';
 import { BlockEditorView, VIEW_TYPE_BLOCK_EDITOR } from './views/block-editor';
 import { AIAnalysisPanelView, VIEW_TYPE_AI_ANALYSIS } from './views/ai-analysis-panel';
+import { CalendarView, VIEW_TYPE_CALENDAR } from './views/calendar-view';
 import { EntityManager } from './entities/manager';
 import { AIAnalyzer } from './ai/analyzer';
 import { createSkillExecutor, SkillExecutor } from './skills';
@@ -25,6 +26,7 @@ export default class LifeWikiPlugin extends Plugin {
 	langGraphAgent?: LangGraphAgent;
 	aiAnalysisView?: AIAnalysisPanelView;
 	agentRegistry?: AgentRegistry;
+	calendarView?: CalendarView;
 
 	constructor(app: App, manifest: PluginManifest) {
 		super(app, manifest);
@@ -121,9 +123,21 @@ export default class LifeWikiPlugin extends Plugin {
 				this.aiAnalysisView = new AIAnalysisPanelView(leaf, this);
 				return this.aiAnalysisView;
 			});
+			this.registerView(VIEW_TYPE_CALENDAR, (leaf) => {
+				this.calendarView = new CalendarView(leaf, this);
+				// Set up date click callback to navigate to that date
+				this.calendarView.setOnDateClick((date: Date) => {
+					this.navigateToDate(date);
+				});
+				return this.calendarView;
+			});
 
 			this.addRibbonIcon('document', '打开日记', () => {
 				this.openBlockEditor();
+			});
+
+			this.addRibbonIcon('calendar', '打开日历', () => {
+				this.openCalendarView();
 			});
 
 			this.addCommand({
@@ -139,6 +153,14 @@ export default class LifeWikiPlugin extends Plugin {
 				name: '打开设置',
 				callback: () => {
 					(this.app as any).setting.open();
+				}
+			});
+
+			this.addCommand({
+				id: 'open-calendar',
+				name: '打开日历',
+				callback: () => {
+					this.openCalendarView();
 				}
 			});
 
@@ -205,6 +227,53 @@ export default class LifeWikiPlugin extends Plugin {
 				return false;
 			}
 		};
+	}
+
+	/**
+	 * Open the calendar view in the right sidebar
+	 */
+	async openCalendarView(): Promise<void> {
+		const { workspace } = this.app;
+
+		// Open calendar in right sidebar
+		const existing = workspace.getLeavesOfType(VIEW_TYPE_CALENDAR);
+		if (existing.length > 0) {
+			workspace.revealLeaf(existing[0]);
+		} else {
+			const rightLeaf = workspace.getRightLeaf(false);
+			if (rightLeaf) {
+				await rightLeaf.setViewState({
+					type: VIEW_TYPE_CALENDAR,
+					active: true
+				});
+				workspace.revealLeaf(rightLeaf);
+			}
+		}
+	}
+
+	/**
+	 * Navigate BlockEditor to a specific date
+	 */
+	async navigateToDate(date: Date): Promise<void> {
+		// First ensure BlockEditor is open
+		await this.openBlockEditor();
+
+		// Get the BlockEditor view and set the date
+		const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_BLOCK_EDITOR);
+		if (leaves.length > 0) {
+			const leaf = leaves[0];
+			const view = leaf.view as BlockEditorView;
+			if (view && typeof view.setCurrentDate === 'function') {
+				await view.setCurrentDate(date);
+			}
+		}
+	}
+
+	/**
+	 * Get the calendar view instance
+	 */
+	getCalendarView(): CalendarView | undefined {
+		return this.calendarView;
 	}
 
 	async openBlockEditor() {
