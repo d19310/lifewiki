@@ -274,25 +274,30 @@ create_vault() {
     fi
 
     # 创建目录结构
-    mkdir -p "${VAULT_PATH}/journal"
+    mkdir -p "${VAULT_PATH}/日记"
     mkdir -p "${VAULT_PATH}/People"
     mkdir -p "${VAULT_PATH}/Projects"
     mkdir -p "${VAULT_PATH}/Things"
     mkdir -p "${VAULT_PATH}/Ideas"
     mkdir -p "${VAULT_PATH}/Knowledge"
-    mkdir -p "${VAULT_PATH}/templates"
-
-    # 复制模板文件
-    cp "${SCRIPT_DIR}/templates/"*.md "${VAULT_PATH}/templates/" 2>/dev/null || true
-    log_info "复制模板文件到: ${VAULT_PATH}/templates/"
+    mkdir -p "${VAULT_PATH}/.lifewiki"
+    mkdir -p "${VAULT_PATH}/.lifewiki/agents"
+    mkdir -p "${VAULT_PATH}/.lifewiki/sessions"
+    mkdir -p "${VAULT_PATH}/.lifewiki/templates""
+    mkdir -p "${VAULT_PATH}/Things"
+    mkdir -p "${VAULT_PATH}/Ideas"
+    mkdir -p "${VAULT_PATH}/Knowledge"
+    mkdir -p "${VAULT_PATH}/.lifewiki"
+    mkdir -p "${VAULT_PATH}/.lifewiki/agent"
+    mkdir -p "${VAULT_PATH}/.lifewiki/sessions"
 
     # 创建 .obsidian 配置目录
     mkdir -p "${VAULT_PATH}/.obsidian"
 
     # 创建初始日记文件
     TODAY=$(date +%Y-%m-%d)
-    if [ ! -f "${VAULT_PATH}/journal/${TODAY}.md" ]; then
-        cat > "${VAULT_PATH}/journal/${TODAY}.md" << 'EOF'
+    if [ ! -f "${VAULT_PATH}/日记/${TODAY}.md" ]; then
+        cat > "${VAULT_PATH}/日记/${TODAY}.md" << 'EOF'
 ---
 uid: {{DATE:YYYYMMDDHHmmss}}
 tags: []
@@ -303,7 +308,13 @@ tags: []
 ## 日记
 
 EOF
-        log_info "创建今日日记: journal/${TODAY}.md"
+        log_info "创建今日日记: 日记/${TODAY}.md"
+    fi
+
+    # 复制 agent 配置文件
+    if [ -d "${SCRIPT_DIR}/src/.lifewiki/agents" ]; then
+        cp -r "${SCRIPT_DIR}/src/.lifewiki/agents/"* "${VAULT_PATH}/.lifewiki/agents/" 2>/dev/null || true
+        log_info "复制 Agent 配置到: ${VAULT_PATH}/.lifewiki/agents/"
     fi
 
     log_info "Vault 创建完成: ${VAULT_PATH}"
@@ -330,6 +341,13 @@ install_plugin() {
         cp "${SCRIPT_DIR}/src" "$PLUGIN_DIR/" -r 2>/dev/null || true
         cp "${SCRIPT_DIR}/main.js" "$PLUGIN_DIR/" 2>/dev/null || true
         cp "${SCRIPT_DIR}/main.css" "$PLUGIN_DIR/" 2>/dev/null || true
+    fi
+
+    # 复制内置模板到 vault 的 .lifewiki 目录
+    mkdir -p "${VAULT_PATH}/.lifewiki/templates"
+    if [ -d "${SCRIPT_DIR}/src/.lifewiki/templates" ]; then
+        cp "${SCRIPT_DIR}/src/.lifewiki/templates/"*.md "${VAULT_PATH}/.lifewiki/templates/" 2>/dev/null || true
+        log_info "复制内置模板到: ${VAULT_PATH}/.lifewiki/templates/"
     fi
 
     cp "${SCRIPT_DIR}/manifest.json" "$PLUGIN_DIR/"

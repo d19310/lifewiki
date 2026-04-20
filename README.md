@@ -90,10 +90,58 @@ lifewiki/
 │   ├── entities/     # 实体提取
 │   ├── views/        # Obsidian 视图
 │   ├── vault/        # 笔记管理
-│   └── utils/        # 工具函数
+│   ├── utils/        # 工具函数
+│   └── .lifewiki/
+│       └── templates/ # 内置模板
 ├── install.sh        # 安装脚本
 └── manifest.json     # 插件配置
 ```
+
+## Vault 目录结构
+
+插件安装后，Vault 目录结构如下：
+
+```
+用户 Vault/
+│
+├── 📁 .obsidian/
+│   └── 📁 plugins/
+│       └── 📁 lifewiki/              # 插件代码
+│
+├── 📁 .lifewiki/                     # LifeWiki 数据目录
+│   ├── 📁 agents/                    # AI Agent 配置
+│   │   └── 📁 chat/                  # 聊天 Agent
+│   │       └── DIARY_REVIEW_SKILL.md  # 日记复盘 Skill
+│   │
+│   ├── 📁 sessions/                 # AI 会话历史
+│   │   └── {blockId}.json
+│   │
+│   └── 📁 templates/                 # 内置模板
+│       ├── journal-template.md       # 日记模板
+│       ├── person-template.md        # 人脉模板
+│       ├── project-template.md        # 项目模板
+│       ├── task-template.md          # 任务模板
+│       ├── thing-template.md         # 物品模板
+│       ├── idea-template.md          # 想法模板
+│       └── knowledge-template.md     # 知识模板
+│
+├── 📁 templates/                     # 用户自定义模板（可选）
+│   └── journal-template.md           # 存在则覆盖内置模板
+│
+├── 📁 日记/                        # 日记文件
+│   └── 2026-04-19.md
+│
+├── 📁 People/                        # 人脉实体
+├── 📁 Projects/                      # 项目实体
+├── 📁 Things/                        # 物品实体
+├── 📁 Ideas/                         # 想法实体
+└── 📁 Knowledge/                     # 知识实体
+```
+
+**说明：**
+- `.lifewiki/` 目录包含所有 LifeWiki 数据，随 Vault 备份
+- `templates/` 目录可放置同名模板文件覆盖内置版本
+- 插件升级不影响 `.lifewiki/` 中的数据
 
 ## 技术栈
 
