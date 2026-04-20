@@ -2,7 +2,7 @@
 	"id": "lifewiki",
 	"name": "LifeWiki",
 	"version": "0.1.0",
-	"minAppVersion": "1.5.0",
+	"minAppVersion": "1.11.0",
 	"description": "AI-powered daily journal analysis with entity extraction, integrated with Obsidian",
 	"author": "Your Name",
 	"authorUrl": "https://github.com/d19310",

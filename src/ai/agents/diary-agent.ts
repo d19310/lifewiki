@@ -45,7 +45,6 @@ export class DiaryAgent implements Agent {
 			provider,
 			this.entityManager,
 			this.app,
-			'',  // systemPrompt is loaded from config
 			this.id  // agentId for loading agent-specific config
 		);
 

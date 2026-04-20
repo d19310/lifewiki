@@ -7,7 +7,6 @@ export interface AgentConfig {
 	identity: string;
 	soul: string;
 	skills: string;
-	memory: string;
 	wiki: string;
 	chatPrompt: string;
 }
@@ -18,7 +17,7 @@ function getAgentDir(agentId: string): string {
 	return `${AGENTS_DIR}/${agentId}`;
 }
 
-const DEFAULT_IDENTITY = `# LifeWiki Agent 身份
+export const DEFAULT_IDENTITY = `# LifeWiki Agent 身份
 
 ## 角色
 你是一个日记分析助手，专门帮助用户从日常日记中识别和归档实体。
@@ -47,7 +46,7 @@ const DEFAULT_IDENTITY = `# LifeWiki Agent 身份
 | idea | 想法/观点 | Ideas/ |
 | knowledge | 知识/文档 | Knowledge/ |`;
 
-const DEFAULT_SOUL = `# LifeWiki Agent 分析规范
+export const DEFAULT_SOUL = `# LifeWiki Agent 分析规范
 
 ## 对话风格要求
 
@@ -60,10 +59,10 @@ const DEFAULT_SOUL = `# LifeWiki Agent 分析规范
 **示例对比：**
 
 ❌ 不要这样说：
-> "我来分析这篇日记。首先检查已归档的人脉实体中是否有提到的名字。**康靖媛**、**张佳伟**都在已归档人脉中..."
+> "我来分析这篇日记。首先检查已归档的人脉实体中是否有提到的名字。**张三**、**李四**都在已归档人脉中..."
 
 ✅ 这样说：
-> "**康靖媛**、**张佳伟** 都是已归档的同事。关于他们有什么要更新的吗？另外，**公共算力平台项目** 是个新项目吗？"
+> "**张三**、**李四** 都是已归档的同事。关于他们有什么要更新的吗？另外，**某某项目** 是个新项目吗？"
 
 ## 实体分析顺序（每次一个类别）
 
@@ -83,7 +82,7 @@ const DEFAULT_SOUL = `# LifeWiki Agent 分析规范
 
 ### 识别已归档实体
 当在已归档实体中找到匹配时：
-> **王五** 已在档案里，他是青岛移动B300项目的对接人。有什么新动态吗？
+> **王五** 已在档案里，他是某某项目的对接人。有什么新动态吗？
 
 ### 确认归档（新人脉）
 用户确认类型后：
@@ -95,11 +94,11 @@ const DEFAULT_SOUL = `# LifeWiki Agent 分析规范
 
 ### 询问更多信息
 如果没有更多信息，询问下一个大类：
-> **公共算力平台运营** 这个词我不太熟，是个项目还是任务？
+> **某某项目** 这个词我不太熟，是个项目还是任务？
 
 ### 发现关系
 发现实体间关系时，询问确认：
-> **张佳伟** 是 **公共算力平台运营项目** 的负责人吗？
+> **李四** 是 **某某项目** 的负责人吗？
 
 ### 所有类别处理完毕
 > 这条日记分析完了，还有别的要处理吗？
@@ -140,7 +139,7 @@ const DEFAULT_SOUL = `# LifeWiki Agent 分析规范
 - 同一项目
 - 同一任务`;
 
-const DEFAULT_SKILLS = `# LifeWiki Agent 可用技能
+export const DEFAULT_SKILLS = `# LifeWiki Agent 可用技能
 
 ## 技能列表
 
@@ -385,54 +384,6 @@ const DEFAULT_SKILLS = `# LifeWiki Agent 可用技能
 }
 \`\`\``;
 
-const DEFAULT_MEMORY = `# 记忆系统提示
-
-## 当前会话上下文
-
-用户正在编辑日期为 **{{date}}** 的日记。
-
-## 本次日记内容
-
-{{block_content}}
-
----
-
-## 本次分析状态
-
-### 已确认的实体（本会话中）
-
-| 类型 | 实体名称 | 状态 | 关系 |
-|------|---------|------|------|
-| 人脉 | - | - | - |
-| 项目 | - | - | - |
-| 任务 | - | - | - |
-| 物品 | - | - | - |
-| 想法 | - | - | - |
-| 知识 | - | - | - |
-
-### 待处理的实体
-
-| 类型 | 实体名称 | 上下文 |
-|------|---------|--------|
-| - | - | - |
-
----
-
-## 对话历史
-
-（对话内容在此累积）
-
----
-
-## 当前分析状态
-
-- [ ] 人脉分析 - 待处理
-- [ ] 事项分析 - 待处理
-- [ ] 物品分析 - 待处理
-- [ ] 想法分析 - 待处理
-- [ ] 知识分析 - 待处理
-- [ ] 关系发现 - 待确认`;
-
 const DEFAULT_WIKI = `# LifeWiki 知识库规范
 
 ## 目录结构
@@ -447,9 +398,9 @@ const DEFAULT_WIKI = `# LifeWiki 知识库规范
 
 | 类型 | 命名规范 | 示例 |
 |------|---------|------|
-| 人脉 | 姓名.md | 顾伟乐.md |
-| 项目 | XXXX项目.md | 青岛移动B300项目.md |
-| 任务 | XXXX任务.md | 公共算力平台运营任务.md |
+| 人脉 | 姓名.md | 张三.md |
+| 项目 | XXXX项目.md | 某某项目.md |
+| 任务 | XXXX任务.md | 某某任务.md |
 | 物品 | 名称.md | Hermes Agent.md |
 | 想法 | 名称.md | 跨平台记忆方案.md |
 | 知识 | 名称.md | Hermes Agent文档.md |
@@ -462,8 +413,8 @@ const DEFAULT_WIKI = `# LifeWiki 知识库规范
 
 \`\`\`markdown
 ## 关联实体
-- [[顾伟乐]] - 项目负责人
-- [[公共算力平台运营项目]] - 所属项目
+- [[张三]] - 项目负责人
+- [[某某项目]] - 所属项目
 \`\`\`
 
 ## frontmatter 要求
@@ -561,11 +512,10 @@ export async function loadAgentConfig(app: any, agentId: string = 'diary'): Prom
 		return fallback;
 	};
 
-	const [identity, soul, skills, memory, wiki, chatPrompt] = await Promise.all([
+	const [identity, soul, skills, wiki, chatPrompt] = await Promise.all([
 		readFile('IDENTITY.md', DEFAULT_IDENTITY),
 		readFile('SOUL.md', DEFAULT_SOUL),
 		readFile('SKILL.md', DEFAULT_SKILLS),
-		readFile('MEMORY.md', DEFAULT_MEMORY),
 		readFile('WIKI.md', DEFAULT_WIKI),
 		readFile('CHAT.md', DEFAULT_CHAT_PROMPT)
 	]);
@@ -574,7 +524,6 @@ export async function loadAgentConfig(app: any, agentId: string = 'diary'): Prom
 		identity,
 		soul,
 		skills,
-		memory,
 		wiki,
 		chatPrompt
 	};

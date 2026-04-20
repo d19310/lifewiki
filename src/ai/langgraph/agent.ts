@@ -20,7 +20,6 @@ export interface LangGraphAgentConfig {
 	provider: AIProvider;
 	entityManager: EntityManager;
 	app: App;
-	systemPrompt: string;
 	agentId?: string;  // 'diary' or 'chat', defaults to 'diary'
 }
 
@@ -38,7 +37,6 @@ export class LangGraphAgent {
 	private provider: AIProvider;
 	private entityManager: EntityManager;
 	private app: App;
-	private systemPrompt: string;
 	private agentId: string;
 	private machines: Map<string, MachineInstance> = new Map();
 	private agentConfig: AgentConfig | null = null;
@@ -47,7 +45,6 @@ export class LangGraphAgent {
 		this.provider = config.provider;
 		this.entityManager = config.entityManager;
 		this.app = config.app;
-		this.systemPrompt = config.systemPrompt;
 		this.agentId = config.agentId || 'diary';
 	}
 
@@ -135,29 +132,7 @@ ${content}
 list_entities: {"entityType": "person"}
 \`\`\`
 
-## 关键规则：发现已归档实体时必须立即更新
-
-当调用 search_entity 返回 {"found": true} 时，意味着该实体已在vault中归档。
-你必须**立即**调用 add_interaction 来更新该实体的互动记录，格式如下：
-
-<function_calls><invoke name="search_entity"><parameter name="name">人名</parameter></invoke></function_calls>
-<function_calls><invoke name="add_interaction"><parameter name="entityId">实体的id</parameter><parameter name="content">在日记中讨论了相关内容</parameter></invoke></function_calls>
-
-不要等用户确认！发现已归档实体后立即更新互动记录。
-
-## 关键提醒
-
-**不要输出分析过程！** 只输出最终的自然对话回复，像朋友聊天一样。
-
-**回复格式：**
-直接用1-2句话自然地回应日记内容，在回复末尾加上 #工作 或 #个人 等标签。不要提及任何分析阶段、函数调用结果。
-
-**示例：**
-
-日记："今天和张三开会讨论项目"
-✅ 正确：好的，项目进展已记录。#工作
-
-❌ 错误：阶段1人脉：已调用xxx... 阶段2项目：...`;
+`;
 		}
 
 		// Fallback simple prompt
@@ -468,14 +443,12 @@ export function createLangGraphAgent(
 	provider: AIProvider,
 	entityManager: EntityManager,
 	app: App,
-	systemPrompt: string,
 	agentId?: string
 ): LangGraphAgent {
 	return new LangGraphAgent({
 		provider,
 		entityManager,
 		app,
-		systemPrompt,
 		agentId
 	});
 }

@@ -1,13 +1,11 @@
 import { App, Notice, Plugin, PluginManifest } from 'obsidian';
-import { LifeWikiSettingTab, LifeWikiSettings, DEFAULT_SETTINGS, createAIProvider } from './settings';
+import { LifeWikiSettingTab, LifeWikiSettings, DEFAULT_SETTINGS, createProviderFromConfig } from './settings';
 import { BlockEditorView, VIEW_TYPE_BLOCK_EDITOR } from './views/block-editor';
 import { AIAnalysisPanelView, VIEW_TYPE_AI_ANALYSIS } from './views/ai-analysis-panel';
 import { CalendarView, VIEW_TYPE_CALENDAR } from './views/calendar-view';
 import { EntityManager } from './entities/manager';
-import { AIAnalyzer } from './ai/analyzer';
 import { createSkillExecutor, SkillExecutor } from './skills';
 import { SessionManager } from './ai/session-manager';
-import { ConversationFlow } from './ai/conversation-flow';
 import { createLangGraphAgent, LangGraphAgent } from './ai/langgraph/agent';
 import type { AIProvider } from './ai/provider';
 import type { AnalysisResult } from './entities/types';
@@ -18,11 +16,9 @@ export default class LifeWikiPlugin extends Plugin {
 	settings!: LifeWikiSettings;
 	settingTab?: LifeWikiSettingTab;
 	entityManager!: EntityManager;
-	aiAnalyzer!: AIAnalyzer;
 	aiProvider!: AIProvider;
 	skillExecutor!: SkillExecutor;
 	sessionManager!: SessionManager;
-	conversationFlow!: ConversationFlow;
 	langGraphAgent?: LangGraphAgent;
 	aiAnalysisView?: AIAnalysisPanelView;
 	agentRegistry?: AgentRegistry;
@@ -52,71 +48,67 @@ export default class LifeWikiPlugin extends Plugin {
 			await this.loadSettings();
 			this.initAIProvider();
 			this.entityManager = new EntityManager(this.app);
-			this.aiAnalyzer = new AIAnalyzer(this.aiProvider, this.entityManager);
 			this.skillExecutor = createSkillExecutor(this.app, this.aiProvider, this.entityManager);
 			this.sessionManager = new SessionManager(this.app);
 			await this.sessionManager.initialize();
-
-			// Initialize based on feature flag
-			// Always initialize conversationFlow for backwards compatibility
-			this.conversationFlow = new ConversationFlow(this.aiProvider, this.app);
-			this.conversationFlow.setEntityManager(this.entityManager);
-			await this.conversationFlow.initialize();
 
 			// Initialize LangGraph agent
 			console.log('LifeWiki: Initializing LangGraph agent...');
 			this.langGraphAgent = createLangGraphAgent(
 				this.aiProvider,
 				this.entityManager,
-				this.app,
-				this.settings.systemPrompt
+				this.app
 			);
 			await this.langGraphAgent.initialize();
 			console.log('LifeWiki: LangGraph agent initialized');
 
-			// Initialize Agent Registry for multi-agent support
-			if (this.settings.useNewAgentArchitecture) {
-				console.log('LifeWiki: Initializing Agent Registry...');
-				const { ProviderManager, DefaultAIProvider } = await import('./ai/providers');
-				const { AgentRegistry, DiaryAgent, ChatAgent } = await import('./ai/agents');
-				const { CustomProvider } = await import('./ai/providers');
+			// Initialize Agent Registry — always enabled
+			console.log('LifeWiki: Initializing Agent Registry...');
+			const { ProviderManager, DefaultAIProvider } = await import('./ai/providers');
+			const { AgentRegistry, DiaryAgent, ChatAgent } = await import('./ai/agents');
+			const { CustomProvider } = await import('./ai/providers');
 
-				const providerManager = new ProviderManager();
+			const providerManager = new ProviderManager();
 
-				// Register default AI provider
-				providerManager.registerProvider(new DefaultAIProvider(this.aiProvider));
-				providerManager.setDefaultProvider('default');
-
-				// Register custom providers from settings
-				for (const customConfig of this.settings.customProviders) {
-					const customProvider = new CustomProvider(customConfig);
-					providerManager.registerProvider(customProvider);
-				}
-
-				// Set up agent-provider mapping from settings
-				const mapping = this.settings.agentProviderMapping;
-				if (mapping.diary) {
-					providerManager.setAgentProvider('diary', mapping.diary);
-				}
-				if (mapping.chat) {
-					providerManager.setAgentProvider('chat', mapping.chat);
-				}
-
-				this.agentRegistry = new AgentRegistry(providerManager);
-
-				// Create agents with AgentRegistry reference (not fixed provider)
-				const diaryAgent = new DiaryAgent(this.agentRegistry, this.entityManager, this.app);
-				const chatAgent = new ChatAgent(this.agentRegistry, this.entityManager, this.app);
-
-				// Initialize agents (they will get their provider from AgentRegistry)
-				await diaryAgent.initialize();
-				await chatAgent.initialize();
-
-				this.agentRegistry.registerAgent(diaryAgent);
-				this.agentRegistry.registerAgent(chatAgent);
-
-				console.log('LifeWiki: Agent Registry initialized');
+			// Register configured providers
+			for (const config of this.settings.providers) {
+				const customProvider = new CustomProvider({
+					id: config.id,
+					name: config.name,
+					type: 'custom',
+					endpoint: config.baseUrl,
+					apiKey: config.apiKey,
+					model: config.model,
+				});
+				providerManager.registerProvider(customProvider);
 			}
+
+			// Register default AI provider as fallback
+			providerManager.registerProvider(new DefaultAIProvider(this.aiProvider));
+			providerManager.setDefaultProvider('default');
+
+			// Set up agent-provider mapping from settings
+			const mapping = this.settings.agentProviderMapping;
+			if (mapping.diary) {
+				providerManager.setAgentProvider('diary', mapping.diary);
+			}
+			if (mapping.chat) {
+				providerManager.setAgentProvider('chat', mapping.chat);
+			}
+
+			this.agentRegistry = new AgentRegistry(providerManager);
+
+			// Create agents
+			const diaryAgent = new DiaryAgent(this.agentRegistry, this.entityManager, this.app);
+			const chatAgent = new ChatAgent(this.agentRegistry, this.entityManager, this.app);
+
+			await diaryAgent.initialize();
+			await chatAgent.initialize();
+
+			this.agentRegistry.registerAgent(diaryAgent);
+			this.agentRegistry.registerAgent(chatAgent);
+
+			console.log('LifeWiki: Agent Registry initialized');
 
 			this.registerView(VIEW_TYPE_BLOCK_EDITOR, (leaf) => new BlockEditorView(leaf, this));
 			this.registerView(VIEW_TYPE_AI_ANALYSIS, (leaf) => {
@@ -132,11 +124,11 @@ export default class LifeWikiPlugin extends Plugin {
 				return this.calendarView;
 			});
 
-			this.addRibbonIcon('document', '打开日记', () => {
+			this.addRibbonIcon('pencil', '打开 LifeWiki', () => {
 				this.openBlockEditor();
 			});
 
-			this.addRibbonIcon('calendar', '打开日历', () => {
+			this.addRibbonIcon('clock', '打开日历', () => {
 				this.openCalendarView();
 			});
 
@@ -185,7 +177,26 @@ export default class LifeWikiPlugin extends Plugin {
 
 	async loadSettings() {
 		const data = await this.loadData();
-		this.settings = { ...DEFAULT_SETTINGS, ...data };
+		this.settings = { ...DEFAULT_SETTINGS, ...data } as LifeWikiSettings;
+
+		// Migrate old single-provider format
+		const old = data as any;
+		if (!this.settings.providers) {
+			(this.settings as any).providers = [];
+		}
+		if (this.settings.providers.length === 0 && old?.apiKey && old?.model) {
+			this.settings.providers = [{
+				id: 'migrated-default',
+				name: old.provider || 'Default',
+				baseUrl: old.baseUrl || '',
+				apiKey: old.apiKey,
+				model: old.model,
+			}];
+			this.settings.agentProviderMapping = {
+				diary: 'migrated-default',
+				chat: 'migrated-default'
+			};
+		}
 	}
 
 	async saveSettings() {
@@ -193,14 +204,23 @@ export default class LifeWikiPlugin extends Plugin {
 	}
 
 	private initAIProvider() {
-		if (!this.settings.apiKey && this.settings.provider !== 'ollama') {
-			console.log('LifeWiki: No API key, using fallback');
+		// Use the provider mapped to diary agent, or the first configured provider
+		const mapping = this.settings.agentProviderMapping;
+		const diaryProviderId = mapping?.diary;
+
+		let providerConfig = this.settings.providers.find(p => p.id === diaryProviderId);
+		if (!providerConfig && this.settings.providers.length > 0) {
+			providerConfig = this.settings.providers[0];
+		}
+
+		if (!providerConfig || !providerConfig.apiKey) {
+			console.log('LifeWiki: No provider configured, using fallback');
 			this.aiProvider = this.createFallbackProvider();
 			return;
 		}
 
 		try {
-			this.aiProvider = createAIProvider(this.settings);
+			this.aiProvider = createProviderFromConfig(providerConfig);
 			console.log('LifeWiki: AI provider initialized');
 		} catch (e) {
 			console.error('LifeWiki: Failed to create AI provider:', e);
@@ -318,20 +338,12 @@ export default class LifeWikiPlugin extends Plugin {
 		return this.entityManager;
 	}
 
-	getAIAnalyzer(): AIAnalyzer {
-		return this.aiAnalyzer;
-	}
-
 	getSkillExecutor(): SkillExecutor {
 		return this.skillExecutor;
 	}
 
 	getSessionManager(): SessionManager {
 		return this.sessionManager;
-	}
-
-	getConversationFlow(): ConversationFlow {
-		return this.conversationFlow;
 	}
 
 	getAIProvider(): AIProvider {

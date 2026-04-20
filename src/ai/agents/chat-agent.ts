@@ -46,7 +46,6 @@ export class ChatAgent implements Agent {
 			provider,
 			this.entityManager,
 			this.app,
-			'',  // systemPrompt is loaded from config
 			this.id  // Use chat-specific config from .lifewiki/agents/chat/
 		);
 

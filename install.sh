@@ -358,6 +358,12 @@ install_plugin() {
         log_info "复制内置模板到: ${VAULT_PATH}/.lifewiki/templates/"
     fi
 
+    # 复制 agent 配置文件到 vault 的 .lifewiki 目录
+    if [ -d "${SCRIPT_DIR}/src/.lifewiki/agents" ]; then
+        cp -r "${SCRIPT_DIR}/src/.lifewiki/agents/" "${VAULT_PATH}/.lifewiki/" 2>/dev/null || true
+        log_info "复制 Agent 配置到: ${VAULT_PATH}/.lifewiki/agents/"
+    fi
+
     cp "${SCRIPT_DIR}/manifest.json" "$PLUGIN_DIR/"
 
     # 检查必要文件
