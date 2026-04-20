@@ -283,13 +283,7 @@ create_vault() {
     mkdir -p "${VAULT_PATH}/.lifewiki"
     mkdir -p "${VAULT_PATH}/.lifewiki/agents"
     mkdir -p "${VAULT_PATH}/.lifewiki/sessions"
-    mkdir -p "${VAULT_PATH}/.lifewiki/templates""
-    mkdir -p "${VAULT_PATH}/Things"
-    mkdir -p "${VAULT_PATH}/Ideas"
-    mkdir -p "${VAULT_PATH}/Knowledge"
-    mkdir -p "${VAULT_PATH}/.lifewiki"
-    mkdir -p "${VAULT_PATH}/.lifewiki/agent"
-    mkdir -p "${VAULT_PATH}/.lifewiki/sessions"
+    mkdir -p "${VAULT_PATH}/.lifewiki/templates"
 
     # 创建 .obsidian 配置目录
     mkdir -p "${VAULT_PATH}/.obsidian"
