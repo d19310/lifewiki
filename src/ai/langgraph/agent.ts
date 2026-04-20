@@ -14,13 +14,14 @@ import { AIProviderAdapter } from './adapter';
 import { EntityTools } from './tools/entity-tools';
 import { BlockAnalysisMachine, createInitialState } from './graph';
 import type { ConfirmedEntity } from './types';
-import { loadAgentConfig, AgentConfig } from '../agent-config';
+import { loadAgentConfig, AgentConfig, DEFAULT_CHAT_PROMPT } from '../agent-config';
 
 export interface LangGraphAgentConfig {
 	provider: AIProvider;
 	entityManager: EntityManager;
 	app: App;
 	systemPrompt: string;
+	agentId?: string;  // 'diary' or 'chat', defaults to 'diary'
 }
 
 interface MachineInstance {
@@ -38,6 +39,7 @@ export class LangGraphAgent {
 	private entityManager: EntityManager;
 	private app: App;
 	private systemPrompt: string;
+	private agentId: string;
 	private machines: Map<string, MachineInstance> = new Map();
 	private agentConfig: AgentConfig | null = null;
 
@@ -46,6 +48,7 @@ export class LangGraphAgent {
 		this.entityManager = config.entityManager;
 		this.app = config.app;
 		this.systemPrompt = config.systemPrompt;
+		this.agentId = config.agentId || 'diary';
 	}
 
 	/**
@@ -53,8 +56,8 @@ export class LangGraphAgent {
 	 */
 	async initialize(): Promise<void> {
 		await this.entityManager.ensureInitialized();
-		// Load agent config from vault
-		this.agentConfig = await loadAgentConfig(this.app);
+		// Load agent config from vault based on agentId
+		this.agentConfig = await loadAgentConfig(this.app, this.agentId);
 	}
 
 	/**
@@ -79,7 +82,25 @@ export class LangGraphAgent {
 			? `\n## 子块上下文\n这是父block的子block。父block ID: ${parentId}\n其他子block内容：\n${siblingBlocks.map(b => `- ${b.content}`).join('\n')}\n`
 			: '';
 
-		// Use agent config or fallback to simple prompt
+		// Special prompt for chat mode (chat:global)
+		if (blockId === 'chat:global') {
+			// Use loaded chat config with skills for tool calling
+			const chatPrompt = this.agentConfig?.chatPrompt || DEFAULT_CHAT_PROMPT;
+			const skills = this.agentConfig?.skills || '';
+			return `${chatPrompt}
+
+${skills}
+
+---
+
+## 已知实体
+${existingEntitiesStr}
+
+## 当前日期
+${date}`;
+		}
+
+		// Use agent config or fallback to simple prompt (for analysis mode)
 		if (this.agentConfig) {
 			return `${this.agentConfig.identity}
 
@@ -160,6 +181,9 @@ ${existingEntitiesStr}
 		parentId: string | null = null,
 		siblingBlocks: { id: string; content: string }[] = []
 	): Promise<BlockAnalysisMachine> {
+		// Check if this is chat mode
+		const isChatMode = blockId === 'chat:global';
+
 		// Get existing entities for context
 		let existingEntities: { name: string; type: string }[] = [];
 		try {
@@ -183,12 +207,14 @@ ${existingEntitiesStr}
 
 		const systemPrompt = this.buildSystemPrompt(blockId, content, existingEntities, parentId, siblingBlocks);
 		const llm = new AIProviderAdapter(this.provider);
-		const tools = new EntityTools(this.entityManager, blockId);
+		const tools = new EntityTools(this.entityManager, blockId, this.app);
 		return new BlockAnalysisMachine(
 			createInitialState(blockId, content),
 			llm,
 			tools,
-			systemPrompt
+			systemPrompt,
+			undefined,
+			isChatMode
 		);
 	}
 
@@ -265,13 +291,14 @@ ${existingEntitiesStr}
 			.slice(0, 2);
 	}
 
-	/**
+		/**
 	 * Continue analysis with user input
 	 */
 	async continueAnalysis(blockId: string, userMessage: string): Promise<{
 		session: BlockSession;
 		userMessage: string;
 		aiResponse?: string;
+		areas?: string[];
 		entityDiscovery?: Array<{
 			name: string;
 			inferredType: 'person' | 'project' | 'thing' | 'idea' | 'knowledge';
@@ -319,6 +346,11 @@ ${existingEntitiesStr}
 
 			if (state.aiResponse) {
 				response.aiResponse = state.aiResponse;
+				// Parse areas from AI response
+				const areas = this.parseAreasFromResponse(state.aiResponse);
+				if (areas.length > 0) {
+					response.areas = areas;
+				}
 			}
 
 			if (state.pendingConfirmations?.length > 0) {
@@ -411,6 +443,22 @@ ${existingEntitiesStr}
 	deleteSession(blockId: string): void {
 		this.machines.delete(blockId);
 	}
+
+	/**
+	 * Simple chat without analysis machine
+	 */
+	async simpleChat(message: string, systemPrompt?: string): Promise<{ content: string; error?: string }> {
+		const prompt = systemPrompt || '你是一个友好的AI助手。';
+		try {
+			const response = await this.provider.chat([
+				{ role: 'system', content: prompt },
+				{ role: 'user', content: message }
+			]);
+			return { content: response.content || '', error: response.error };
+		} catch (e) {
+			return { content: '', error: (e as Error).message };
+		}
+	}
 }
 
 /**
@@ -420,12 +468,14 @@ export function createLangGraphAgent(
 	provider: AIProvider,
 	entityManager: EntityManager,
 	app: App,
-	systemPrompt: string
+	systemPrompt: string,
+	agentId?: string
 ): LangGraphAgent {
 	return new LangGraphAgent({
 		provider,
 		entityManager,
 		app,
-		systemPrompt
+		systemPrompt,
+		agentId
 	});
 }

@@ -5,7 +5,7 @@
 
 import { ItemView, WorkspaceLeaf, setIcon } from 'obsidian';
 import type LifeWikiPlugin from '../main';
-import { AnalysisResult, BlockSession, ChatMessage } from '../entities/types';
+import { AnalysisResult, BlockSession, ChatMessage, PanelMode, ParsedBlock } from '../entities/types';
 
 export const VIEW_TYPE_AI_ANALYSIS = 'lifewiki-ai-analysis';
 
@@ -13,9 +13,13 @@ export class AIAnalysisPanelView extends ItemView {
 	private plugin: LifeWikiPlugin;
 	private activeBlockId: string | null = null;
 	private activeParentId: string | null = null; // Parent ID when in child block context
+	private mode: PanelMode = 'analysis';
 	private chatMessagesEl: HTMLElement | null = null;
 	private inputTextarea: HTMLTextAreaElement | null = null;
 	private sendBtnEl: HTMLElement | null = null;
+	private chatModeClearBtnEl: HTMLElement | null = null;
+	private headerTitleEl: HTMLElement | null = null;
+	private modeSelectEl: HTMLSelectElement | null = null;
 	private isLoading: boolean = false;
 	private emptyStateEl: HTMLElement | null = null;
 	private pendingEntities: Array<{ name: string; inferredType: string; reason: string }> = [];
@@ -31,7 +35,7 @@ export class AIAnalysisPanelView extends ItemView {
 	}
 
 	getDisplayText(): string {
-		return 'AI洞察';
+		return this.mode === 'chat' ? 'AI聊天' : 'AI洞察';
 	}
 
 	async onOpen() {
@@ -58,21 +62,28 @@ export class AIAnalysisPanelView extends ItemView {
 		const headerTitle = header.createEl('div', {
 			cls: 'lifewiki-ai-header-title'
 		});
-		headerTitle.createEl('span', { text: 'AI 洞察' });
+		this.headerTitleEl = headerTitle.createEl('span', { text: 'AI 洞察' });
 
 		// Header actions
 		const headerActions = header.createEl('div', {
 			cls: 'lifewiki-ai-header-actions'
 		});
 
-		// Clear button with eraser icon
-		const clearBtn = headerActions.createEl('button', {
+		// Clear button (only visible in chat mode)
+		this.chatModeClearBtnEl = headerActions.createEl('button', {
 			cls: 'lifewiki-ai-clear-btn',
-			attr: { title: '清空对话' }
+			attr: { title: '清空聊天' }
 		});
-		setIcon(clearBtn, 'eraser');
-		clearBtn.addEventListener('click', () => {
-			this.clearConversation();
+		setIcon(this.chatModeClearBtnEl, 'trash-2');
+		// Make icon bigger
+		const clearSvg = this.chatModeClearBtnEl.querySelector('svg');
+		if (clearSvg) {
+			clearSvg.setAttribute('width', '20');
+			clearSvg.setAttribute('height', '20');
+		}
+		this.chatModeClearBtnEl.addClass('hidden');
+		this.chatModeClearBtnEl.addEventListener('click', () => {
+			this.clearChatSession();
 		});
 
 		// Scrollable chat area
@@ -105,7 +116,7 @@ export class AIAnalysisPanelView extends ItemView {
 			cls: 'lifewiki-chat-input-wrapper'
 		});
 
-		// Input row with textarea and send button
+		// Input row with textarea only (expanded)
 		const inputRow = inputWrapper.createEl('div', {
 			cls: 'lifewiki-input-row'
 		});
@@ -125,13 +136,6 @@ export class AIAnalysisPanelView extends ItemView {
 			this.updateSendBtnState();
 		});
 
-		// Send button with icon (bottom-right of input row)
-		this.sendBtnEl = inputRow.createEl('button', {
-			cls: 'lifewiki-send-btn',
-			attr: { title: '发送' }
-		});
-		setIcon(this.sendBtnEl, 'arrow-up');
-
 		// Keyboard events
 		this.inputTextarea.addEventListener('keydown', (e) => {
 			if (e.key === 'Enter' && !e.shiftKey) {
@@ -139,6 +143,34 @@ export class AIAnalysisPanelView extends ItemView {
 				this.sendMessage();
 			}
 		});
+
+		// Mode selector row (below input row)
+		const modeRow = inputWrapper.createEl('div', {
+			cls: 'lifewiki-mode-row'
+		});
+
+		// Mode selector (left side)
+		this.modeSelectEl = modeRow.createEl('select', {
+			cls: 'lifewiki-mode-select'
+		}) as HTMLSelectElement;
+		this.modeSelectEl.createEl('option', { value: 'analysis', text: '📊 分析模式' });
+		this.modeSelectEl.createEl('option', { value: 'chat', text: '💬 聊天模式' });
+
+		this.modeSelectEl.addEventListener('change', () => {
+			const selectedMode = this.modeSelectEl?.value as PanelMode;
+			if (selectedMode === 'chat') {
+				this.switchToChatMode();
+			} else {
+				this.switchToAnalysisMode();
+			}
+		});
+
+		// Send button (right side, aligned with mode selector)
+		this.sendBtnEl = modeRow.createEl('button', {
+			cls: 'lifewiki-send-btn',
+			attr: { title: '发送' }
+		});
+		setIcon(this.sendBtnEl, 'arrow-up');
 
 		// Send button click
 		this.sendBtnEl.addEventListener('click', () => {
@@ -241,8 +273,8 @@ export class AIAnalysisPanelView extends ItemView {
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	width: 28px;
-	height: 28px;
+	width: 32px;
+	height: 32px;
 	border-radius: 8px;
 	border: none;
 	background: transparent;
@@ -252,8 +284,15 @@ export class AIAnalysisPanelView extends ItemView {
 }
 
 .lifewiki-ai-clear-btn:hover {
-	background: var(--surface-container-high);
-	color: var(--primary);
+	background: rgba(239, 68, 68, 0.1);
+	color: #ef4444;
+}
+
+.lifewiki-ai-clear-btn svg {
+	width: 20px !important;
+	height: 20px !important;
+	transform: scale(1.2);
+	transform-origin: center;
 }
 
 .lifewiki-ai-scroll {
@@ -261,6 +300,7 @@ export class AIAnalysisPanelView extends ItemView {
 	overflow-y: auto;
 	overflow-x: hidden;
 	padding: 16px;
+	padding-bottom: 200px; /* Account for fixed input area */
 	display: flex;
 	flex-direction: column;
 	background: transparent !important;
@@ -416,7 +456,7 @@ export class AIAnalysisPanelView extends ItemView {
 
 .lifewiki-ai-input-area {
 	position: absolute;
-	bottom: 52px;
+	bottom: 32px;
 	left: 16px;
 	right: 16px;
 	z-index: 20;
@@ -426,12 +466,12 @@ export class AIAnalysisPanelView extends ItemView {
 .lifewiki-chat-input-wrapper {
 	background: var(--surface-container-lowest);
 	border-radius: 16px;
-	padding: 16px;
+	padding: 12px;
 	box-shadow: 0 10px 40px -10px rgba(26, 28, 28, 0.06);
 	border: 1px solid rgba(204, 195, 214, 0.15);
 	display: flex;
 	flex-direction: column;
-	min-height: 120px;
+	min-height: 100px;
 }
 
 .lifewiki-chat-input-wrapper:focus-within {
@@ -441,16 +481,14 @@ export class AIAnalysisPanelView extends ItemView {
 
 .lifewiki-input-row {
 	display: flex;
-	align-items: flex-end;
-	gap: 8px;
+	align-items: stretch;
 	flex: 1;
-	min-height: 80px;
 }
 
 .lifewiki-input-textarea {
 	flex: 1;
-	min-height: 80px;
-	max-height: 200px;
+	min-height: 60px;
+	max-height: 180px;
 	resize: none;
 	border: none !important;
 	padding: 0;
@@ -488,7 +526,11 @@ export class AIAnalysisPanelView extends ItemView {
 	cursor: pointer;
 	transition: background-color 0.2s, transform 0.2s;
 	flex-shrink: 0;
-	margin-bottom: 2px;
+}
+
+.lifewiki-send-btn svg {
+	width: 24px !important;
+	height: 24px !important;
 }
 
 .lifewiki-send-btn:hover {
@@ -587,6 +629,59 @@ export class AIAnalysisPanelView extends ItemView {
 	color: var(--primary);
 }
 
+/* Mode row - left aligned, with send button on right */
+.lifewiki-mode-row {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	gap: 8px;
+	margin-top: 8px;
+}
+
+/* Mode switch select */
+.lifewiki-mode-select {
+	padding: 4px 8px;
+	border-radius: 6px;
+	border: 1px solid var(--surface-container-high);
+	background: var(--surface-container-high);
+	color: var(--on-surface-variant);
+	font-family: var(--font-body);
+	font-size: 12px;
+	font-weight: 500;
+	cursor: pointer;
+	transition: all 0.15s;
+	outline: none;
+}
+
+.lifewiki-mode-select:focus {
+	border-color: var(--surface-container-high);
+}
+
+.lifewiki-mode-select:hover {
+	border-color: var(--primary);
+	color: var(--primary);
+}
+
+.lifewiki-mode-select:focus {
+	border-color: var(--primary);
+	box-shadow: 0 0 0 2px rgba(92, 40, 184, 0.1);
+}
+
+.lifewiki-mode-select option {
+	background: var(--surface-container-high);
+	color: var(--on-surface);
+}
+
+/* Hidden class for header elements */
+.lifewiki-ai-header-actions .hidden {
+	display: none;
+}
+
+/* Chat mode active state */
+.chat-mode .lifewiki-ai-panel {
+	/* Additional styling when in chat mode */
+}
+
 @media (max-width: 400px) {
 	.lifewiki-chat-msg {
 		max-width: 92%;
@@ -610,6 +705,93 @@ export class AIAnalysisPanelView extends ItemView {
 		this.chatMessagesEl?.empty();
 		this.activeBlockId = null;
 		this.showEmptyState();
+	}
+
+	public switchToChatMode() {
+		this.mode = 'chat';
+		this.activeBlockId = null;
+
+		// Update panel title
+		if (this.headerTitleEl) {
+			this.headerTitleEl.textContent = 'AI聊天';
+		}
+
+		// Update mode select
+		if (this.modeSelectEl) {
+			this.modeSelectEl.value = 'chat';
+		}
+
+		// Show clear button in header
+		if (this.chatModeClearBtnEl) {
+			this.chatModeClearBtnEl.removeClass('hidden');
+		}
+
+		// Update input placeholder
+		if (this.inputTextarea) {
+			this.inputTextarea.placeholder = '说点什么...';
+		}
+
+		// Add chat mode class to panel
+		this.containerEl.querySelector('.lifewiki-ai-panel')?.addClass('chat-mode');
+
+		// Load chat session if exists
+		const sessionManager = this.plugin.getSessionManager();
+		const chatSession = sessionManager.getChatSession();
+		if (chatSession && chatSession.messages.length > 0) {
+			this.showChatState();
+			this.chatMessagesEl?.empty();
+			for (const message of chatSession.messages) {
+				this.addChatMessage(message.role, message.content);
+			}
+		} else {
+			this.showEmptyState();
+		}
+	}
+
+	public switchToAnalysisMode() {
+		this.mode = 'analysis';
+
+		// Update panel title
+		if (this.headerTitleEl) {
+			this.headerTitleEl.textContent = 'AI洞察';
+		}
+
+		// Update mode select
+		if (this.modeSelectEl) {
+			this.modeSelectEl.value = 'analysis';
+		}
+
+		// Hide clear button in header
+		if (this.chatModeClearBtnEl) {
+			this.chatModeClearBtnEl.addClass('hidden');
+		}
+
+		// Update input placeholder
+		if (this.inputTextarea) {
+			this.inputTextarea.placeholder = '输入你的回复...';
+		}
+
+		// Remove chat mode class
+		this.containerEl.querySelector('.lifewiki-ai-panel')?.removeClass('chat-mode');
+	}
+
+	public clearChatSession() {
+		const sessionManager = this.plugin.getSessionManager();
+		sessionManager.clearChatSession();
+		this.chatMessagesEl?.empty();
+		this.showEmptyState();
+	}
+
+	public setMode(mode: PanelMode) {
+		if (mode === 'chat') {
+			this.switchToChatMode();
+		} else {
+			this.switchToAnalysisMode();
+		}
+	}
+
+	public getMode(): PanelMode {
+		return this.mode;
 	}
 
 	private showThinkingIndicator() {
@@ -645,6 +827,8 @@ export class AIAnalysisPanelView extends ItemView {
 	}
 
 	setActiveBlock(blockId: string, blockContent: string, parentId?: string | null) {
+		// Always switch to analysis mode when selecting a block
+		this.switchToAnalysisMode();
 		this.activeBlockId = blockId;
 		this.activeParentId = parentId || null;
 		const sessionManager = this.plugin.getSessionManager();
@@ -655,6 +839,8 @@ export class AIAnalysisPanelView extends ItemView {
 	}
 
 	startNewSession(blockId: string, blockContent: string, initialResponse: string, parentId: string | null = null) {
+		// Always switch to analysis mode when starting a new session
+		this.switchToAnalysisMode();
 		this.activeBlockId = blockId;
 		this.activeParentId = parentId;
 		this.showChatState();
@@ -734,10 +920,19 @@ export class AIAnalysisPanelView extends ItemView {
 	}
 
 	private async sendMessage() {
-		if (!this.inputTextarea || this.isLoading || !this.activeBlockId) return;
+		if (!this.inputTextarea || this.isLoading) return;
 
 		const content = this.inputTextarea.value.trim();
 		if (!content) return;
+
+		// In chat mode, we don't need activeBlockId
+		if (this.mode === 'chat') {
+			await this.sendChatMessage(content);
+			return;
+		}
+
+		// Analysis mode requires active block
+		if (!this.activeBlockId) return;
 
 		this.isLoading = true;
 		this.inputTextarea.value = '';
@@ -781,6 +976,11 @@ export class AIAnalysisPanelView extends ItemView {
 				await this.handleRelations(result.relations);
 			}
 
+			// Update block category if AI response contains area tags
+			if (result.areas && result.areas.length > 0 && this.activeBlockId && !this.activeParentId) {
+				await this.updateBlockCategory(this.activeBlockId, result.areas[0]);
+			}
+
 			if (result.aiResponse) {
 				this.addChatMessage('assistant', result.aiResponse);
 			} else if (result.error) {
@@ -793,6 +993,104 @@ export class AIAnalysisPanelView extends ItemView {
 					role: 'assistant',
 					content: aiContent
 				}, this.activeParentId);
+			}
+		} catch (error) {
+			console.error('AI chat error:', error);
+			this.hideThinkingIndicator();
+			this.addChatMessage('assistant', '抱歉，AI 响应失败: ' + (error as Error).message);
+		}
+
+		this.isLoading = false;
+		this.updateSendBtnState();
+	}
+
+	private async sendChatMessage(content: string) {
+		this.isLoading = true;
+		this.inputTextarea.value = '';
+		this.autoResizeTextarea();
+		this.updateSendBtnState();
+
+		this.addChatMessage('user', content);
+		this.showThinkingIndicator();
+
+		const sessionManager = this.plugin.getSessionManager();
+		sessionManager.addChatMessage({ role: 'user', content });
+
+		try {
+			// Try to use AgentRegistry with ChatAgent first
+			const agentRegistry = this.plugin.getAgentRegistry();
+			console.log('[Chat] agentRegistry:', agentRegistry ? 'exists' : 'null');
+			console.log('[Chat] hasAgent(chat):', agentRegistry?.hasAgent('chat'));
+			if (agentRegistry && agentRegistry.hasAgent('chat')) {
+				const chatAgent = agentRegistry.getAgent('chat');
+				console.log('[Chat] chatAgent:', chatAgent ? 'found' : 'null');
+				if (chatAgent) {
+					const result = await chatAgent.continue(
+						{ blockId: 'chat:global', content: '' },
+						content
+					);
+
+					this.hideThinkingIndicator();
+
+					if (result.response) {
+						// Strip thinking tags from response
+						const cleanContent = (result.response as string)
+							.replace(/<[Tt]hinking>[\s\S]*?<\/[Tt]hinking>/gi, '')
+							.replace(/<[Tt]hink>[\s\S]*?<\/[Tt]hink>/gi, '')
+							.replace(/<\/?[Tt]hink>/g, '')
+							.replace(/<\/?[Tt]hinking>/g, '')
+							.trim();
+						this.addChatMessage('assistant', cleanContent);
+						sessionManager.addChatMessage({ role: 'assistant', content: cleanContent });
+					} else if (result.error) {
+						this.addChatMessage('assistant', `错误: ${result.error}`);
+					}
+				}
+			} else {
+				// Fallback to LangGraph agent for chat mode
+				console.log('[Chat] Falling back to LangGraph agent');
+				const agent = this.plugin.getLangGraphAgent();
+				if (agent) {
+					// Use 'chat:global' as pseudo blockId for chat mode
+					const result = await agent.continueAnalysis('chat:global', content);
+
+					this.hideThinkingIndicator();
+
+					if (result.aiResponse) {
+						// Strip thinking tags from response
+						const cleanContent = result.aiResponse
+							.replace(/<[Tt]hinking>[\s\S]*?<\/[Tt]hinking>/gi, '')
+							.replace(/<[Tt]hink>[\s\S]*?<\/[Tt]hink>/gi, '')
+							.replace(/<\/?[Tt]hink>/g, '')
+							.replace(/<\/?[Tt]hinking>/g, '')
+							.trim();
+						this.addChatMessage('assistant', cleanContent);
+						sessionManager.addChatMessage({ role: 'assistant', content: cleanContent });
+					} else if (result.error) {
+						this.addChatMessage('assistant', `错误: ${result.error}`);
+					}
+				} else {
+					// Fallback to simple chat without tools
+					const aiProvider = this.plugin.getAIProvider();
+					const chatSession = sessionManager.getChatSession();
+					const messages: ChatMessage[] = chatSession?.messages || [];
+					const systemMessage: ChatMessage = {
+						role: 'system',
+						content: '你是一个友好的AI助手，可以和用户讨论各种话题，包括日记复盘、思考总结等。'
+					};
+					const response = await aiProvider.chat([systemMessage, ...messages]);
+
+					this.hideThinkingIndicator();
+
+					if (response.content) {
+						const cleanContent = response.content
+							.replace(/<think>[\s\S]*?<\/think>/gi, '')
+							.replace(/<think>[\s\S]*?/gi, '')
+							.trim();
+						this.addChatMessage('assistant', cleanContent);
+						sessionManager.addChatMessage({ role: 'assistant', content: cleanContent });
+					}
+				}
 			}
 		} catch (error) {
 			console.error('AI chat error:', error);
@@ -934,6 +1232,28 @@ export class AIAnalysisPanelView extends ItemView {
 			} catch (error) {
 				console.error(`[AIAnalysisPanel] Failed to create relation:`, error);
 			}
+		}
+	}
+
+	/**
+	 * Update block category based on AI-detected area tags
+	 */
+	private async updateBlockCategory(blockId: string, category: string): Promise<void> {
+		try {
+			const blockEditor = this.plugin.getBlockEditor();
+			if (!blockEditor) return;
+
+			const block = blockEditor.getBlockById(blockId) as ParsedBlock | undefined;
+			if (!block) return;
+
+			// Only update if block is still in '待分析' state or already has a different category
+			if ((block as ParsedBlock).category === '待分析' || (block as ParsedBlock).category !== category) {
+				(block as ParsedBlock).category = category;
+				await blockEditor.saveBlockToFile(block as ParsedBlock);
+				console.log(`[AIAnalysisPanel] Updated block ${blockId} category to ${category}`);
+			}
+		} catch (error) {
+			console.error(`[AIAnalysisPanel] Failed to update block category:`, error);
 		}
 	}
 
