@@ -128,7 +128,7 @@ lifewiki/
 ├── 📁 templates/                     # 用户自定义模板（可选）
 │   └── journal-template.md           # 存在则覆盖内置模板
 │
-├── 📁 日记/                        # 日记文件
+├── 📁 Daily/                        # 日记文件
 │   └── 2026-04-19.md
 │
 ├── 📁 People/                        # 人脉实体

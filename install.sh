@@ -274,7 +274,7 @@ create_vault() {
     fi
 
     # 创建目录结构
-    mkdir -p "${VAULT_PATH}/日记"
+    mkdir -p "${VAULT_PATH}/Daily"
     mkdir -p "${VAULT_PATH}/People"
     mkdir -p "${VAULT_PATH}/Projects"
     mkdir -p "${VAULT_PATH}/Things"
@@ -296,8 +296,8 @@ create_vault() {
 
     # 创建初始日记文件
     TODAY=$(date +%Y-%m-%d)
-    if [ ! -f "${VAULT_PATH}/日记/${TODAY}.md" ]; then
-        cat > "${VAULT_PATH}/日记/${TODAY}.md" << 'EOF'
+    if [ ! -f "${VAULT_PATH}/Daily/${TODAY}.md" ]; then
+        cat > "${VAULT_PATH}/Daily/${TODAY}.md" << 'EOF'
 ---
 uid: {{DATE:YYYYMMDDHHmmss}}
 tags: []
@@ -308,7 +308,7 @@ tags: []
 ## 日记
 
 EOF
-        log_info "创建今日日记: 日记/${TODAY}.md"
+        log_info "创建今日日记: Daily/${TODAY}.md"
     fi
 
     # 复制 agent 配置文件
