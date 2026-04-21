@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# LifeWiki 安装脚本
+# LifeWiki 安装脚本 v1.3
 # 自动在用户机器上安装 LifeWiki 插件和创建 vault
 #
 
@@ -298,6 +298,7 @@ create_vault() {
     mkdir -p "${VAULT_PATH}/.lifewiki/agents"
     mkdir -p "${VAULT_PATH}/.lifewiki/sessions"
     mkdir -p "${VAULT_PATH}/.lifewiki/templates"
+    mkdir -p "${VAULT_PATH}/.lifewiki/skills"
 
     # 创建 .obsidian 配置目录
     mkdir -p "${VAULT_PATH}/.obsidian"
@@ -319,10 +320,16 @@ EOF
         log_info "创建今日日记: Daily/${TODAY}.md"
     fi
 
-    # 复制 agent 配置文件
+    # 复制 Agent 配置到 vault 的 .lifewiki 目录
     if [ -d "${SCRIPT_DIR}/src/.lifewiki/agents" ]; then
-        cp -r "${SCRIPT_DIR}/src/.lifewiki/agents/"* "${VAULT_PATH}/.lifewiki/agents/" 2>/dev/null || true
+        cp -r "${SCRIPT_DIR}/src/.lifewiki/agents/" "${VAULT_PATH}/.lifewiki/" 2>/dev/null || true
         log_info "复制 Agent 配置到: ${VAULT_PATH}/.lifewiki/agents/"
+    fi
+
+    # 复制 Skill 配置到 vault 的 .lifewiki 目录
+    if [ -d "${SCRIPT_DIR}/.lifewiki/skills" ]; then
+        cp -r "${SCRIPT_DIR}/.lifewiki/skills/" "${VAULT_PATH}/.lifewiki/" 2>/dev/null || true
+        log_info "复制 Skill 配置到: ${VAULT_PATH}/.lifewiki/skills/"
     fi
 
     log_info "Vault 创建完成: ${VAULT_PATH}"
@@ -358,10 +365,18 @@ install_plugin() {
         log_info "复制内置模板到: ${VAULT_PATH}/.lifewiki/templates/"
     fi
 
-    # 复制 agent 配置文件到 vault 的 .lifewiki 目录
+    # 复制 Agent 配置到 vault 的 .lifewiki 目录
     if [ -d "${SCRIPT_DIR}/src/.lifewiki/agents" ]; then
+        mkdir -p "${VAULT_PATH}/.lifewiki/agents"
         cp -r "${SCRIPT_DIR}/src/.lifewiki/agents/" "${VAULT_PATH}/.lifewiki/" 2>/dev/null || true
         log_info "复制 Agent 配置到: ${VAULT_PATH}/.lifewiki/agents/"
+    fi
+
+    # 复制 Skill 配置到 vault 的 .lifewiki 目录
+    if [ -d "${SCRIPT_DIR}/.lifewiki/skills" ]; then
+        mkdir -p "${VAULT_PATH}/.lifewiki/skills"
+        cp -r "${SCRIPT_DIR}/.lifewiki/skills/" "${VAULT_PATH}/.lifewiki/" 2>/dev/null || true
+        log_info "复制 Skill 配置到: ${VAULT_PATH}/.lifewiki/skills/"
     fi
 
     cp "${SCRIPT_DIR}/manifest.json" "$PLUGIN_DIR/"
@@ -413,6 +428,7 @@ install_brat() {
         mkdir -p "${VAULT_PATH}/.lifewiki/agents"
         mkdir -p "${VAULT_PATH}/.lifewiki/sessions"
         mkdir -p "${VAULT_PATH}/.lifewiki/templates"
+        mkdir -p "${VAULT_PATH}/.lifewiki/skills"
     fi
 
     # 创建 .obsidian/plugins 目录
