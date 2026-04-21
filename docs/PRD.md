@@ -97,44 +97,55 @@ LifeWiki 是一款 Obsidian 插件，通过 AI 辅助实现流水账式日记分
 
 ### 2.4 Agent 架构
 
-LifeWiki 采用双 Agent 架构，配置文件存放于 Vault 的 `.lifewiki/agents/` 目录：
+LifeWiki 采用双 Agent 架构，配置文件存放于 Vault 的 `.lifewiki/` 目录：
 
 ```
-.lifewiki/agents/
-├── diary/                    # 日记分析 Agent
-│   ├── IDENTITY.md          # 身份定义
-│   ├── SOUL.md              # 分析流程规范
-│   ├── SKILL.md              # 可用技能
-│   └── WIKI.md               # 知识库结构
-│
-└── chat/                     # 全能对话 Agent
-    ├── IDENTITY.md           # 身份定义
-    ├── SOUL.md               # 对话流程规范
-    ├── SKILL.md              # 可用技能
-    └── WIKI.md               # 知识库结构
+.lifewiki/
+├── agents/                    # Agent 配置
+│   ├── diary/                 # 日记分析 Agent
+│   │   ├── IDENTITY.md        # 身份定义
+│   │   ├── SOUL.md            # 分析流程规范
+│   │   └── WIKI.md            # 知识库结构
+│   └── chat/                   # 全能对话 Agent
+│       ├── IDENTITY.md         # 身份定义
+│       ├── SOUL.md             # 对话流程规范
+│       └── WIKI.md             # 知识库结构
+└── skills/                     # 共享技能目录
+    ├── list_entities/          # 批量获取已归档实体
+    │   ├── SKILL.md            # 技能定义
+    │   └── executor.ts          # 执行脚本
+    ├── search_entity/          # 搜索单个实体
+    ├── create_entity/           # 创建新实体档案
+    ├── add_interaction/         # 添加互动记录
+    ├── link_entities/           # 建立实体间双链关系
+    ├── update_entity/           # 更新已有实体
+    ├── read_local_document/     # 读取本地文档
+    └── clip_and_summarize/      # 抓取网页内容
 ```
 
 **配置文件说明**：
 
 | 文件 | 作用 |
 |------|------|
-| `IDENTITY.md` | 角色身份定义（Who） |
-| `SOUL.md` | 工作流程规范（How） |
-| `SKILL.md` | 工具定义（What） |
-| `WIKI.md` | 档案结构规范 |
+| `agents/{agentId}/IDENTITY.md` | 角色身份定义（Who） |
+| `agents/{agentId}/SOUL.md` | 工作流程规范（How） |
+| `skills/*/SKILL.md` | 技能定义（共享，各 Agent 可用） |
+| `agents/{agentId}/WIKI.md` | 档案结构规范 |
 
 **System Prompt 构建顺序**：
 ```
-{identity}     ← 我是谁
-{soul}         ← 我怎么工作
-{skills}       ← 我能用什么工具
-{wiki}         ← 档案的格式规范
+{identity}           ← 我是谁
+{soul}               ← 我怎么工作
+{skills}            ← 我能用什么技能（从 skills/ 目录加载）
+{wiki}              ← 档案的格式规范
 ---
 当前会话上下文
 已知实体
 对话历史
 函数调用格式
 ```
+
+**技能目录结构**：所有 Agent 共享的技能定义在 `.lifewiki/skills/` 目录，每个技能包含 SKILL.md（定义）和 executor.ts（实现）。
 
 ---
 
@@ -183,53 +194,64 @@ LifeWiki 采用双 Agent 架构，配置文件存放于 Vault 的 `.lifewiki/age
 | knowledge | 文章/论文/媒体/新闻/文档/链接 | Knowledge/ |
 ```
 
-#### 3.1.2 SOUL.md — 6阶段×4步骤分析流程
+#### 3.1.2 SOUL.md — 5步自动分析流程
 
-**核心原则**：按顺序自动执行所有阶段，不要询问用户，确认后直接结束。
+**核心原则**：按顺序执行各步骤，某些步骤可能需要多轮对话确认。
 
 **执行顺序**：
-1. 人脉 (People)
-2. 事项 (Projects/Tasks)
-3. 物品 (Things)
-4. 想法 (Ideas)
-5. 知识 (Knowledge)
-6. 领域 (Area) — 工作/个人/学习/其他
+1. 实体检测 — 同时检测所有类型实体 + 文件/链接/附件
+2. 实体处理 — 多轮对话创建/更新实体
+3. 关系发现 — 多轮对话建立实体间关联
+4. 冲突检测和处理 — 检测事实冲突并处理
+5. 分析总结 — 简短总结 + 领域标签
 
-**每阶段4步骤**：
+**执行流程**：
 
 ```
-第1步：实体检测
-  └─ 调用 list_entities 获取该类别的已归档实体列表
-  └─ 在日记内容中检测是否提及这些实体
-  └─ 检测是否有新的、未归档的同类实体
-  └─ 如果没发现任何实体（已归档或新），直接跳过本阶段
+Step 1：实体检测
+  └─ 调用 list_entities 获取所有已归档实体（按类型批量查询）
+  └─ 在日记内容中检测是否提及这些已归档实体
+  └─ 检测是否有新的、未归档的实体
+  └─ 检测是否有本地文件路径、网页链接、附件
+  └─ 如果没有任何发现，直接进入 Step 5
 
-第2步：实体档案创建或更新
-  ├─ 发现已归档实体 → 立即调用 add_interaction（无需确认）
-  └─ 发现新实体 → 提示用户确认，确认后调用 create_entity
+Step 2：实体处理
+  ├─ 对每个新实体，询问用户确认类型
+  ├─ 用户确认后，调用 create_entity / add_interaction
+  ├─ 对已归档实体，直接调用 add_interaction（无需确认）
+  ├─ 对本地文件，调用 read_local_document 后创建实体
+  └─ 对网页链接，调用 clip_and_summarize 抓取并总结
 
-第3步：实体关系发现和更新（自动处理）
-  └─ 发现实体间的新关系时，直接调用 link_entities（无需确认）
+Step 3：关系发现
+  └─ 分析实体之间的潜在关联
+  └─ 调用 link_entities 建立实体间双链关系（无需确认）
 
-第4步：事实冲突检测和处理（需用户确认）
-  └─ 检测到矛盾 → 确认最新状态 → 用户确认后调用 update_entity
+Step 4：冲突检测和处理
+  └─ 检测日记内容与已有档案的事实冲突
+  └─ 用户确认后调用 update_entity 更新
+
+Step 5：分析总结
+  └─ 用 1-2 句话总结分析结果
+  └─ 自动更新该条日记的领域标签到 block 元数据中
 ```
 
 **关键规则**：
 - 禁止虚假声明：必须先调用工具，再声称"已更新"
-- 结束回复格式：在末尾加上 `#工作 #个人` 等标签
+- 结束回复格式：在末尾加上 #工作 #个人 等标签
 
 #### 3.1.3 SKILL.md — 工具定义
 
-| 工具 | 用途 | 输入 |
+技能定义在共享的 `.lifewiki/skills/` 目录，各 Agent 共享使用：
+
+| 技能 | 用途 | 输入 |
 |------|------|------|
-| `list_entities` | 获取某类别的所有已归档实体 | `{entityType, status}` |
+| `list_entities` | 批量获取某类型的所有已归档实体 | `{entityType, status}` |
 | `search_entity` | 搜索单个实体 | `{name}` |
 | `create_entity` | 创建新实体档案 | `{entityType, name, summary, metadata}` |
 | `update_entity` | 更新已有实体 | `{entityId, updates}` |
 | `add_interaction` | 添加互动记录 | `{entityId, content, sourceBlockId}` |
 | `link_entities` | 建立实体间关系 | `{entityIdA, entityIdB, relation, context}` |
-| `get_entity_history` | 获取实体互动历史 | `{entityId}` |
+| `read_local_document` | 读取本地文件系统中的 Markdown 文档 | `{path}` |
 | `clip_and_summarize` | 抓取并总结网页 | `{url}` |
 
 ---

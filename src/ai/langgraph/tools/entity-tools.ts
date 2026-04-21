@@ -33,6 +33,42 @@ export const SummarizeDocumentInputSchema = z.object({
 	title: z.string().optional().describe('Document title for context')
 });
 
+export const DetectEntitiesInputSchema = z.object({
+	diaryContent: z.string().describe('Diary content to analyze for entity detection'),
+	options: z.object({
+		enableFuzzyMatch: z.boolean().optional().describe('Enable fuzzy matching with edit distance'),
+		similarityThreshold: z.number().optional().describe('Similarity threshold for fuzzy matching (0-1)'),
+		includeLocalFiles: z.boolean().optional().describe('Extract local file paths from content'),
+		includeWebLinks: z.boolean().optional().describe('Extract web URLs from content'),
+		addInteractionsToArchived: z.array(z.object({
+			entityId: z.string().describe('Entity ID to add interaction to'),
+			content: z.string().describe('Interaction content')
+		})).optional().describe('Batch add interactions to archived entities')
+	}).optional()
+});
+
+export const ProcessEntitiesInputSchema = z.object({
+	entities: z.array(z.object({
+		name: z.string().optional().describe('Entity name for create action'),
+		action: z.enum(['create', 'add_interaction', 'link']).describe('Operation type'),
+		entityId: z.string().optional().describe('Entity ID for add_interaction action'),
+		entityType: z.enum(['person', 'project', 'thing', 'idea', 'knowledge']).optional().describe('Entity type for create action'),
+		summary: z.string().optional().describe('Summary for create action'),
+		content: z.string().optional().describe('Interaction content for add_interaction action'),
+		entityIdA: z.string().optional().describe('First entity ID for link action'),
+		entityIdB: z.string().optional().describe('Second entity ID for link action'),
+		relation: z.string().optional().describe('Relation type for link action'),
+		context: z.string().optional().describe('Context for link action'),
+		metadata: z.record(z.any()).optional().describe('Metadata for create action')
+	})).describe('Array of entity operations to process'),
+	options: z.object({
+		skipOnConflict: z.boolean().optional().describe('Skip on conflict')
+	}).optional()
+});
+
+export type DetectEntitiesInput = z.infer<typeof DetectEntitiesInputSchema>;
+export type ProcessEntitiesInput = z.infer<typeof ProcessEntitiesInputSchema>;
+
 export type SearchVaultInput = z.infer<typeof SearchVaultInputSchema>;
 export type ReadDocumentInput = z.infer<typeof ReadDocumentInputSchema>;
 export type GetRelatedEntitiesInput = z.infer<typeof GetRelatedEntitiesInputSchema>;
@@ -65,10 +101,12 @@ export const AddInteractionInputSchema = z.object({
 });
 
 export const LinkEntitiesInputSchema = z.object({
-	entityIdA: z.string().describe('First entity ID'),
-	entityIdB: z.string().describe('Second entity ID'),
-	relation: z.string().describe('Relationship type'),
-	context: z.string().optional().describe('Relationship context')
+	links: z.array(z.object({
+		entityIdA: z.string().describe('First entity ID'),
+		entityIdB: z.string().describe('Second entity ID'),
+		relation: z.string().describe('Relationship type'),
+		context: z.string().optional().describe('Relationship context')
+	})).describe('Array of entity links to create')
 });
 
 export const ListEntitiesInputSchema = z.object({
@@ -270,24 +308,19 @@ export class EntityTools {
 	}
 
 	/**
-	 * Link two entities
+	 * Link entities (batch)
 	 */
 	async linkEntities(input: LinkEntitiesInput): Promise<ToolExecutionResult> {
 		try {
-			const entityA = this.entityManager.getEntity(input.entityIdA);
-			if (!entityA) {
-				return { success: false, error: 'Entity A not found' };
-			}
-			const relations = [...(entityA.relatedEntities || [])];
-			relations.push({
-				entityId: input.entityIdB,
-				relation: input.relation as any,
-				context: input.context || ''
-			});
-			await this.entityManager.updateEntity(input.entityIdA, { relatedEntities: relations });
-			return { success: true, data: { success: true } };
+			// Import and delegate to skill executor
+			const { linkEntitiesExecutor } = await import('../skills-registry');
+			const context = {
+				entityManager: this.entityManager,
+				blockId: this.blockId
+			};
+			return linkEntitiesExecutor(context as any, input);
 		} catch (error) {
-			return { success: false, error: `Link failed: ${(error as Error).message}` };
+			return { success: false, error: `Link entities failed: ${(error as Error).message}` };
 		}
 	}
 
@@ -725,6 +758,67 @@ export class EntityTools {
 			};
 		} catch (error) {
 			return { success: false, error: `Summarize document failed: ${(error as Error).message}` };
+		}
+	}
+
+	/**
+	 * Detect entities in diary content with efficient layered matching
+	 * Uses HashMap for O(1) exact lookup, Trie for prefix matching,
+	 * and edit distance for fuzzy matching
+	 */
+	async detectEntities(input: DetectEntitiesInput): Promise<ToolExecutionResult> {
+		try {
+			// Import the executor dynamically to avoid circular dependency
+			const { detectEntitiesExecutor } = await import('../skills-registry');
+
+			const context = {
+				entityManager: this.entityManager,
+				app: this.app,
+				blockId: this.blockId
+			};
+
+			return await detectEntitiesExecutor(context as any, input);
+		} catch (error) {
+			return { success: false, error: `Detect entities failed: ${(error as Error).message}` };
+		}
+	}
+
+	/**
+	 * Batch process entity operations - create, add_interaction, link
+	 */
+	async processEntities(input: ProcessEntitiesInput): Promise<ToolExecutionResult> {
+		try {
+			// Import the executor dynamically to avoid circular dependency
+			const { processEntitiesExecutor } = await import('../skills-registry');
+
+			const context = {
+				entityManager: this.entityManager,
+				app: this.app,
+				blockId: this.blockId
+			};
+
+			return await processEntitiesExecutor(context as any, input);
+		} catch (error) {
+			return { success: false, error: `Process entities failed: ${(error as Error).message}` };
+		}
+	}
+
+	/**
+	 * Update block metadata (category, areas)
+	 */
+	async updateBlockMetadata(input: { blockId: string; updates: { category?: string; areas?: string[] } }): Promise<ToolExecutionResult> {
+		try {
+			// Import the executor dynamically to avoid circular dependency
+			const { updateBlockMetadataExecutor } = await import('../skills-registry');
+
+			const context = {
+				app: this.app,
+				blockId: this.blockId
+			};
+
+			return await updateBlockMetadataExecutor(context as any, input);
+		} catch (error) {
+			return { success: false, error: `Update block metadata failed: ${(error as Error).message}` };
 		}
 	}
 }

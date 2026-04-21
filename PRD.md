@@ -1,4 +1,4 @@
-# LifeWiki 产品规格文档 V1.2
+# LifeWiki 产品规格文档 V1.3
 
 ## 1. 产品概述
 
@@ -242,14 +242,50 @@ LifeWiki 的 AI 分析采用 Agent 架构，将 AI 行为规范固化到配置�
 ```
 
 ### link_entities
-建立实体间的双链关系。
+批量建立实体间的双向关联关系。关系类型：负责人、成员、相关、同一项目、同一任务、属于、包含、对立、上下游，合作、替代、组成。
 
 ```
-输入: {
-  "entityIdA": "xxx",
-  "entityIdB": "yyy",
-  "relation": "负责人|成员|相关|..."
-}
+输入: { "links": [{ "entityIdA": "xxx", "entityIdB": "yyy", "relation": "负责人" }] }
+输出: { "results": { "linked": [...], "errors": [...] }, "summary": { "totalLinked": 1 } }
+```
+
+### detect_entities
+高效检测日记中的实体，支持精确匹配、别名匹配、Trie前缀匹配、编辑距离匹配。
+
+```
+输入: { "diaryContent": "...", "options": { "enableFuzzyMatch": true } }
+输出: { "archivedMatches": [...], "newEntities": [...], "localFiles": [...], "webLinks": [...] }
+```
+
+### process_entities
+批量处理实体操作——创建实体、添加互动记录、关联实体。
+
+```
+输入: { "entities": [{ "action": "create"|"add_interaction"|"link", ... }] }
+输出: { "results": { "created": [...], "interactions": [...], "links": [...] } }
+```
+
+### detect_conflicts
+检测日记内容与实体档案之间的事实冲突。冲突类型：value_changed、status_changed、relation_conflict。
+
+```
+输入: { "entityId": "xxx", "diaryContent": "..." }
+输出: { "hasConflicts": true/false, "conflicts": [...], "summary": {...} }
+```
+
+### process_updates
+批量更新多个实体的字段信息。
+
+```
+输入: { "updates": [{ "entityId": "xxx", "changes": {...} }] }
+输出: { "results": { "updated": [...], "errors": [...] } }
+```
+
+### update_block_metadata
+更新 block 的领域标签和分类。
+
+```
+输入: { "blockId": "xxx", "updates": { "category": "工作" } }
 输出: { "success": true }
 ```
 ```

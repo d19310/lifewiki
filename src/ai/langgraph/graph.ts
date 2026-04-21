@@ -73,16 +73,92 @@ const TOOLS = [
 	},
 	{
 		name: 'link_entities',
-		description: 'Create a relationship between two entities',
+		description: 'Batch create bidirectional relationships between entities',
 		parameters: {
 			type: 'object',
 			properties: {
-				entityIdA: { type: 'string', description: 'First entity ID' },
-				entityIdB: { type: 'string', description: 'Second entity ID' },
-				relation: { type: 'string', description: 'Relationship type' },
-				context: { type: 'string', description: 'Relationship context' }
+				links: {
+					type: 'array',
+					description: 'Array of entity links to create',
+					items: {
+						type: 'object',
+						properties: {
+							entityIdA: { type: 'string', description: 'First entity ID' },
+							entityIdB: { type: 'string', description: 'Second entity ID' },
+							relation: { type: 'string', description: 'Relationship type' },
+							context: { type: 'string', description: 'Relationship context' }
+						},
+						required: ['entityIdA', 'entityIdB', 'relation']
+					}
+				}
 			},
-			required: ['entityIdA', 'entityIdB', 'relation']
+			required: ['links']
+		}
+	},
+	{
+		name: 'detect_conflicts',
+		description: 'Detect factual conflicts between diary content and entity archive',
+		parameters: {
+			type: 'object',
+			properties: {
+				entityId: { type: 'string', description: 'Entity ID to check for conflicts' },
+				diaryContent: { type: 'string', description: 'Diary content to compare against entity archive' },
+				options: {
+					type: 'object',
+					properties: {
+						checkFields: { type: 'array', items: { type: 'string' }, description: 'Fields to check for conflicts' },
+						strictMode: { type: 'boolean', description: 'If true, any difference is considered a conflict' }
+					}
+				}
+			},
+			required: ['entityId', 'diaryContent']
+		}
+	},
+	{
+		name: 'process_updates',
+		description: 'Batch update multiple entity fields',
+		parameters: {
+			type: 'object',
+			properties: {
+				updates: {
+					type: 'array',
+					description: 'Array of entity updates to process',
+					items: {
+						type: 'object',
+						properties: {
+							entityId: { type: 'string', description: 'Entity ID to update' },
+							changes: { type: 'object', description: 'Fields to update' },
+							reason: { type: 'string', description: 'Reason for update (for interaction record)' }
+						},
+						required: ['entityId', 'changes']
+					}
+				},
+				options: {
+					type: 'object',
+					properties: {
+						skipOnError: { type: 'boolean', description: 'Skip on error' }
+					}
+				}
+			},
+			required: ['updates']
+		}
+	},
+	{
+		name: 'update_block_metadata',
+		description: 'Update block category and area tags',
+		parameters: {
+			type: 'object',
+			properties: {
+				blockId: { type: 'string', description: 'Block ID to update' },
+				updates: {
+					type: 'object',
+					properties: {
+						category: { type: 'string', enum: ['工作', '个人', '待确认'], description: 'Block category' },
+						areas: { type: 'array', items: { type: 'string' }, description: 'Area tags' }
+					}
+				}
+			},
+			required: ['blockId', 'updates']
 		}
 	},
 	{
@@ -246,6 +322,73 @@ const TOOLS = [
 				entityId: { type: 'string', description: 'Entity ID to get related entities for' }
 			},
 			required: ['entityId']
+		}
+	},
+	{
+		name: 'detect_entities',
+		description: 'Efficiently detect entities in diary content with fuzzy matching. Supports exact match, alias match, trie prefix match, and edit distance matching.',
+		parameters: {
+			type: 'object',
+			properties: {
+				diaryContent: { type: 'string', description: 'Diary content to analyze for entity detection' },
+				options: {
+					type: 'object',
+					description: 'Detection options',
+					properties: {
+						enableFuzzyMatch: { type: 'boolean', description: 'Enable fuzzy matching with edit distance' },
+						similarityThreshold: { type: 'number', description: 'Similarity threshold for fuzzy matching (0-1)' },
+						includeLocalFiles: { type: 'boolean', description: 'Extract local file paths from content' },
+						includeWebLinks: { type: 'boolean', description: 'Extract web URLs from content' },
+						addInteractionsToArchived: {
+							type: 'array',
+							description: 'Batch add interactions to archived entities',
+							items: {
+								type: 'object',
+								properties: {
+									entityId: { type: 'string', description: 'Entity ID to add interaction to' },
+									content: { type: 'string', description: 'Interaction content' }
+								}
+							}
+						}
+					}
+				}
+			},
+			required: ['diaryContent']
+		}
+	},
+	{
+		name: 'process_entities',
+		description: 'Batch process entity operations - create entities, add interactions, link entities. Reduces multiple round-trips into a single call.',
+		parameters: {
+			type: 'object',
+			properties: {
+				entities: {
+					type: 'array',
+					description: 'Array of entity operations to process',
+					items: {
+						type: 'object',
+						properties: {
+							name: { type: 'string', description: 'Entity name for create action' },
+							action: { type: 'string', enum: ['create', 'add_interaction', 'link'], description: 'Operation type' },
+							entityId: { type: 'string', description: 'Entity ID for add_interaction action' },
+							entityType: { type: 'string', enum: ['person', 'project', 'thing', 'idea', 'knowledge'], description: 'Entity type for create action' },
+							summary: { type: 'string', description: 'Summary for create action' },
+							content: { type: 'string', description: 'Interaction content for add_interaction action' },
+							entityIdA: { type: 'string', description: 'First entity ID for link action' },
+							entityIdB: { type: 'string', description: 'Second entity ID for link action' },
+							relation: { type: 'string', description: 'Relation type for link action' }
+						}
+					}
+				},
+				options: {
+					type: 'object',
+					description: 'Processing options',
+					properties: {
+						skipOnConflict: { type: 'boolean', description: 'Skip on conflict' }
+					}
+				}
+			},
+			required: ['entities']
 		}
 	}
 ];
@@ -609,6 +752,12 @@ ${this.state.messages.slice(-4).map((m: any) => {
 				case 'get_related_entities':
 					result = await this.tools.getRelatedEntitiesFromVault(call.args);
 					break;
+				case 'detect_entities':
+					result = await this.tools.detectEntities(call.args);
+					break;
+				case 'process_entities':
+					result = await this.tools.processEntities(call.args);
+					break;
 				default:
 					result = { success: false, error: `Unknown tool: ${call.name}` };
 			}
@@ -714,6 +863,15 @@ ${this.state.messages.slice(-4).map((m: any) => {
 					break;
 				case 'get_related_entities':
 					result = await this.tools.getRelatedEntitiesFromVault(args);
+					break;
+				case 'detect_entities':
+					result = await this.tools.detectEntities(args);
+					break;
+				case 'process_entities':
+					result = await this.tools.processEntities(args);
+					break;
+				case 'update_block_metadata':
+					result = await this.tools.updateBlockMetadata(args);
 					break;
 				default:
 					result = { success: false, error: `Unknown tool: ${name}` };
