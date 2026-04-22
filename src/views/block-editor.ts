@@ -928,6 +928,46 @@ export class BlockEditorView extends ItemView {
 			.lifewiki-input-box::-webkit-scrollbar-thumb:hover {
 				background: rgba(204, 195, 214, 0.6);
 			}
+
+			/* Context Menu */
+			.lifewiki-context-menu {
+				position: fixed;
+				background: var(--surface-container-lowest);
+				border: 1px solid rgba(204, 195, 214, 0.3);
+				border-radius: 8px;
+				box-shadow: 0 8px 24px -4px rgba(26, 28, 28, 0.15);
+				padding: 6px 0;
+				z-index: 1000;
+				min-width: 200px;
+			}
+
+			.lifewiki-context-menu-item {
+				padding: 10px 16px;
+				font-size: 13px;
+				cursor: pointer;
+				transition: background-color 0.15s;
+				display: flex;
+				align-items: center;
+				gap: 8px;
+			}
+
+			.lifewiki-context-menu-item:hover {
+				background: var(--surface-container-high);
+			}
+
+			.lifewiki-context-menu-item.danger {
+				color: #d32f2f;
+			}
+
+			.lifewiki-context-menu-item.danger:hover {
+				background: rgba(211, 47, 47, 0.1);
+			}
+
+			.lifewiki-context-menu-divider {
+				height: 1px;
+				background: rgba(204, 195, 214, 0.3);
+				margin: 6px 0;
+			}
 		`;
 		this.containerEl.appendChild(styleEl);
 	}
@@ -1425,6 +1465,14 @@ export class BlockEditorView extends ItemView {
 					e.stopPropagation();
 					this.startChildEditMode(child.id, block.id);
 				});
+
+				// Right-click context menu for child block
+				childEl.addEventListener('contextmenu', (e) => {
+					e.preventDefault();
+					e.stopPropagation();
+					this.selectChildBlock(child.id, block.id);
+					this.showContextMenu(child.id, block.id, true, e.clientX, e.clientY);
+				});
 			}
 		}
 
@@ -1443,6 +1491,14 @@ export class BlockEditorView extends ItemView {
 		// Double-click to edit
 		card.addEventListener('dblclick', () => {
 			this.startEditMode(block.id);
+		});
+
+		// Right-click context menu for parent block
+		card.addEventListener('contextmenu', (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+			this.selectBlock(block.id);
+			this.showContextMenu(block.id, null, false, e.clientX, e.clientY);
 		});
 	}
 
@@ -1508,6 +1564,255 @@ export class BlockEditorView extends ItemView {
 				aiView.setActiveBlock(childId, parentBlock.content, parentId);
 			}
 		}
+	}
+
+	/**
+	 * Show context menu for block deletion
+	 */
+	private showContextMenu(blockId: string, parentId: string | null, isChild: boolean, x: number, y: number) {
+		// Remove existing context menu
+		const existingMenu = document.querySelector('.lifewiki-context-menu');
+		if (existingMenu) existingMenu.remove();
+
+		const menu = document.createElement('div');
+		menu.className = 'lifewiki-context-menu';
+		menu.style.left = `${x}px`;
+		menu.style.top = `${y}px`;
+
+		// Check if session exists
+		const sessionManager = this.plugin.getSessionManager();
+		const effectiveBlockId = parentId || blockId;
+		const hasSession = sessionManager.getSession(effectiveBlockId, parentId) !== null;
+
+		// Determine block info for messages
+		let blockInfo = '';
+		if (isChild) {
+			const parent = this.blocks.find(b => b.id === parentId);
+			if (parent) {
+				const childCount = parent.children.length;
+				blockInfo = childCount > 1 ? ` (共 ${childCount} 个子Block)` : '';
+			}
+		} else {
+			const block = this.blocks.find(b => b.id === blockId);
+			if (block && block.children.length > 0) {
+				blockInfo = ` (含 ${block.children.length} 个子Block)`;
+			}
+		}
+
+		// Menu item 1: Delete block only
+		const deleteItem = document.createElement('div');
+		deleteItem.className = 'lifewiki-context-menu-item danger';
+		deleteItem.textContent = isChild ? '删除此子Block' : `删除日记Block${blockInfo}`;
+		deleteItem.addEventListener('click', () => {
+			menu.remove();
+			this.confirmAndDeleteBlock(blockId, parentId, isChild, false);
+		});
+		menu.appendChild(deleteItem);
+
+		// Menu item 2: Delete block + session (only if session exists and it's a parent block)
+		if (hasSession && !isChild) {
+			const deleteSessionItem = document.createElement('div');
+			deleteSessionItem.className = 'lifewiki-context-menu-item danger';
+			deleteSessionItem.textContent = `删除Block及会话记录${blockInfo}`;
+			deleteSessionItem.addEventListener('click', () => {
+				menu.remove();
+				this.confirmAndDeleteBlock(blockId, parentId, isChild, true);
+			});
+			menu.appendChild(deleteSessionItem);
+		}
+
+		document.body.appendChild(menu);
+
+		// Close menu when clicking outside
+		const closeMenu = (e: MouseEvent) => {
+			if (!menu.contains(e.target as Node)) {
+				menu.remove();
+				document.removeEventListener('click', closeMenu);
+			}
+		};
+		setTimeout(() => document.addEventListener('click', closeMenu), 0);
+	}
+
+	/**
+	 * Confirm and delete block
+	 */
+	private async confirmAndDeleteBlock(blockId: string, parentId: string | null, isChild: boolean, deleteSession: boolean) {
+		let message = '';
+		let childCount = 0;
+
+		if (isChild) {
+			const parent = this.blocks.find(b => b.id === parentId);
+			if (parent) {
+				childCount = parent.children.length;
+			}
+			message = `确定要删除这个子Block吗？`;
+			if (childCount > 1) {
+				message += `\n\n注意：父Block还有 ${childCount - 1} 个子Block。`;
+			}
+		} else {
+			const block = this.blocks.find(b => b.id === blockId);
+			if (block) {
+				childCount = block.children.length;
+			}
+			if (deleteSession) {
+				message = `确定要删除这个日记Block及其会话记录吗？`;
+			} else {
+				message = `确定要删除这个日记Block吗？`;
+			}
+			if (childCount > 0) {
+				message += `\n\n注意：这将同时删除所有 ${childCount} 个子Block。`;
+			}
+			if (deleteSession) {
+				message += `\n\n会话记录将被永久删除。`;
+			}
+		}
+
+		// Use Obsidian's built-in confirm (in a real app, you'd use a modal)
+		const confirmed = confirm(message);
+		if (!confirmed) return;
+
+		await this.deleteBlock(blockId, parentId, isChild, deleteSession);
+	}
+
+	/**
+	 * Delete a block
+	 */
+	private async deleteBlock(blockId: string, parentId: string | null, isChild: boolean, deleteSession: boolean) {
+		try {
+			if (isChild && parentId) {
+				// Delete child block only
+				await this.deleteChildBlockFromFile(blockId, parentId);
+			} else {
+				// Delete parent block (and all children)
+				await this.deleteParentBlockFromFile(blockId, deleteSession);
+			}
+
+			// Clean up session if needed
+			if (deleteSession) {
+				const sessionManager = this.plugin.getSessionManager();
+				const agent = this.plugin.getLangGraphAgent();
+				const effectiveBlockId = parentId || blockId;
+
+				await sessionManager.clearSession(effectiveBlockId);
+				agent?.deleteSession(effectiveBlockId);
+			}
+
+			// Reload blocks
+			await this.loadBlocks();
+			this.renderBlocks();
+
+			// Clear selection
+			this.selectedBlockId = null;
+			this.selectedBlockContent = null;
+
+			// Notify AI panel
+			const aiView = this.plugin.getAIAnalysisView();
+			if (aiView) {
+				aiView.setActiveBlock(null, null);
+			}
+		} catch (error) {
+			console.error('[LifeWiki] Error deleting block:', error);
+			alert('删除失败: ' + (error instanceof Error ? error.message : '未知错误'));
+		}
+	}
+
+	/**
+	 * Delete a child block from file
+	 */
+	private async deleteChildBlockFromFile(childId: string, parentId: string) {
+		// Find the diary file
+		const dailyPath = `Daily/${this.currentDate}.md`;
+		let file = this.app.vault.getAbstractFileByPath(dailyPath);
+
+		if (!file || !(file instanceof TFile)) {
+			file = this.app.vault.getAbstractFileByPath(`${this.currentDate}.md`);
+		}
+
+		if (!file || !(file instanceof TFile)) {
+			file = this.app.vault.getAbstractFileByPath(`${DIARY_FOLDER}/${this.currentDate}.md`);
+		}
+
+		if (!(file instanceof TFile)) return;
+
+		const content = await this.app.vault.read(file);
+		const lines = content.split('\n');
+
+		// Find and remove the child block line: - HH:mm content <!-- childId -->
+		const childRegex = new RegExp(`^- \\d{2}:\\d{2}\\s.+<!-- ${childId} -->`);
+		const newLines = lines.filter(line => !line.match(childRegex));
+
+		// Write back
+		await this.app.vault.modify(file, newLines.join('\n'));
+
+		// Also remove from memory
+		const parentBlock = this.blocks.find(b => b.id === parentId);
+		if (parentBlock) {
+			parentBlock.children = parentBlock.children.filter(c => c.id !== childId);
+		}
+	}
+
+	/**
+	 * Delete a parent block (and all children) from file
+	 */
+	private async deleteParentBlockFromFile(blockId: string, deleteSession: boolean) {
+		// Find the diary file
+		const dailyPath = `Daily/${this.currentDate}.md`;
+		let file = this.app.vault.getAbstractFileByPath(dailyPath);
+
+		if (!file || !(file instanceof TFile)) {
+			file = this.app.vault.getAbstractFileByPath(`${this.currentDate}.md`);
+		}
+
+		if (!file || !(file instanceof TFile)) {
+			file = this.app.vault.getAbstractFileByPath(`${DIARY_FOLDER}/${this.currentDate}.md`);
+		}
+
+		if (!(file instanceof TFile)) return;
+
+		const content = await this.app.vault.read(file);
+		const lines = content.split('\n');
+
+		// Find the block header line: ### HH:mm [source] #category
+		let blockLineIndex = -1;
+		const headerRegex = new RegExp(`^### \\d{2}:\\d{2} \\[([^\\]]+)\\] #(\\S+)`);
+
+		for (let i = 0; i < lines.length; i++) {
+			if (lines[i].match(headerRegex)) {
+				// Check if this is our block by looking at the block ID in subsequent content
+				// Block ID is stored in comment at end of content line
+				const block = this.blocks.find(b => b.id === blockId);
+				if (block && lines[i].includes(block.timestamp)) {
+					// Find the content line with the block ID
+					for (let j = i + 1; j < Math.min(i + 5, lines.length); j++) {
+						if (lines[j].includes(`<!-- ${blockId} -->`)) {
+							blockLineIndex = i;
+							break;
+						}
+					}
+					if (blockLineIndex !== -1) break;
+				}
+			}
+		}
+
+		if (blockLineIndex === -1) return;
+
+		// Find the end of this block (next ### header or end of file)
+		let endIndex = lines.length;
+		for (let i = blockLineIndex + 1; i < lines.length; i++) {
+			if (lines[i].match(headerRegex)) {
+				endIndex = i;
+				break;
+			}
+		}
+
+		// Remove the block lines
+		lines.splice(blockLineIndex, endIndex - blockLineIndex);
+
+		// Write back
+		await this.app.vault.modify(file, lines.join('\n'));
+
+		// Also remove from memory
+		this.blocks = this.blocks.filter(b => b.id !== blockId);
 	}
 
 	/**

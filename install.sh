@@ -31,14 +31,19 @@ usage() {
     echo "选项:"
     echo "  -n, --name <名称>       Vault 名称 (默认: ${DEFAULT_VAULT_NAME})"
     echo "  -p, --parent <路径>     Vault 父目录 (默认: ${HOME})"
-    echo "  -s, --skip-build        跳过 npm build (使用已编译的 main.js)"
+    echo "  -s, --skip-build        跳过构建，使用已编译的 main.js"
     echo "  -b, --brat              使用 BRAT 从 GitHub 安装"
     echo "  -r, --repo <repo>       GitHub 仓库地址 (默认: d19310/lifewiki)"
     echo "  -h, --help              显示帮助"
     echo ""
+    echo "说明:"
+    echo "  默认模式会先构建插件，再复制编译文件到 vault"
+    echo "  -s 模式直接使用已存在的 main.js，跳过构建"
+    echo ""
     echo "示例:"
-    echo "  $0                                    # 交互式安装"
+    echo "  $0                                    # 交互式安装（自动构建）"
     echo "  $0 -n \"MyVault\" -p \"~/Documents\"     # 自定义 vault 名称和位置"
+    echo "  $0 -s                                 # 使用已编译文件快速安装"
     echo "  $0 -b                                 # 使用 BRAT 从 GitHub 安装"
     exit 1
 }
@@ -346,12 +351,15 @@ install_plugin() {
 
     if [ "$SKIP_BUILD" = true ]; then
         log_info "复制预编译文件..."
-        cp "${SCRIPT_DIR}/main.js" "$PLUGIN_DIR/" 2>/dev/null || { log_error "main.js 复制失败"; exit 1; }
+        cp "${SCRIPT_DIR}/main.js" "$PLUGIN_DIR/" || { log_error "main.js 复制失败"; exit 1; }
         cp "${SCRIPT_DIR}/main.css" "$PLUGIN_DIR/" 2>/dev/null || true
     else
-        log_info "复制源码文件..."
-        cp "${SCRIPT_DIR}/src" "$PLUGIN_DIR/" -r 2>/dev/null || true
-        cp "${SCRIPT_DIR}/main.js" "$PLUGIN_DIR/" 2>/dev/null || { log_error "main.js 复制失败"; exit 1; }
+        # 源码模式：构建并复制编译后的文件
+        log_info "构建插件..."
+        cd "$SCRIPT_DIR" && npm run build 2>/dev/null || { log_error "构建失败"; exit 1; }
+
+        log_info "复制编译文件..."
+        cp "${SCRIPT_DIR}/main.js" "$PLUGIN_DIR/" || { log_error "main.js 复制失败"; exit 1; }
         cp "${SCRIPT_DIR}/main.css" "$PLUGIN_DIR/" 2>/dev/null || true
     fi
 
