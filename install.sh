@@ -18,8 +18,8 @@ PLUGIN_NAME="lifewiki"
 DEFAULT_VAULT_NAME="LifeWiki Vault"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-# 安装选项（用于最终确认前调整）
-SKIP_BUILD=false
+# 安装选项
+USE_LOCAL=false
 USE_BRAT=false
 GITHUB_REPO="d19310/lifewiki"
 VAULT_PARENT_DIR="$HOME"
@@ -31,19 +31,19 @@ usage() {
     echo "选项:"
     echo "  -n, --name <名称>       Vault 名称 (默认: ${DEFAULT_VAULT_NAME})"
     echo "  -p, --parent <路径>     Vault 父目录 (默认: ${HOME})"
-    echo "  -s, --skip-build        跳过构建，使用已编译的 main.js"
     echo "  -b, --brat              使用 BRAT 从 GitHub 安装"
     echo "  -r, --repo <repo>       GitHub 仓库地址 (默认: d19310/lifewiki)"
+    echo "  -l, --local             使用本地已构建的文件（跳过下载）"
     echo "  -h, --help              显示帮助"
     echo ""
     echo "说明:"
-    echo "  默认模式会先构建插件，再复制编译文件到 vault"
-    echo "  -s 模式直接使用已存在的 main.js，跳过构建"
+    echo "  默认从 GitHub 下载预构建的插件文件"
+    echo "  -l 模式使用本地已存在的 main.js"
     echo ""
     echo "示例:"
-    echo "  $0                                    # 交互式安装（自动构建）"
-    echo "  $0 -n \"MyVault\" -p \"~/Documents\"     # 自定义 vault 名称和位置"
-    echo "  $0 -s                                 # 使用已编译文件快速安装"
+    echo "  $0                                    # 从 GitHub 下载安装"
+    echo "  $0 -n \"MyVault\" -p \"~/Documents\"     # 自定义 vault"
+    echo "  $0 -l                                 # 使用本地构建文件"
     echo "  $0 -b                                 # 使用 BRAT 从 GitHub 安装"
     exit 1
 }
@@ -75,8 +75,8 @@ while [[ $# -gt 0 ]]; do
             VAULT_PARENT_DIR="$2"
             shift 2
             ;;
-        -s|--skip-build)
-            SKIP_BUILD=true
+        -l|--local)
+            USE_LOCAL=true
             shift
             ;;
         -b|--brat)
@@ -163,54 +163,36 @@ check_obsidian() {
 check_dependencies() {
     log_step "检查依赖环境..."
 
-    local node_ok=false
-    local npm_ok=false
-
-    if command -v node &> /dev/null; then
-        log_info "Node.js: $(node --version) ✓"
-        node_ok=true
+    # 检查 curl (用于下载插件)
+    if command -v curl &> /dev/null; then
+        log_info "curl: 已安装 ✓"
     else
-        log_warn "Node.js: 未找到"
-    fi
-
-    if command -v npm &> /dev/null; then
-        log_info "npm: $(npm --version) ✓"
-        npm_ok=true
-    else
-        log_warn "npm: 未找到"
-    fi
-
-    if $node_ok && $npm_ok; then
+        log_warn "curl: 未找到"
         echo ""
-        return 0
-    fi
-
-    echo ""
-    echo "LifeWiki 插件需要 Node.js 来构建。"
-    echo ""
-    read -p "是否通过 Homebrew 安装 Node.js? (y/n) " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        log_info "跳过 Node.js 安装"
+        echo "LifeWiki 安装脚本需要 curl 来下载插件。"
         echo ""
-        return 0
+        read -p "是否通过 Homebrew 安装 curl? (y/n) " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            if ! command -v brew &> /dev/null; then
+                log_info "安装 Homebrew..."
+                /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+                eval "$(brew shellenv)"
+            fi
+            log_info "安装 curl..."
+            brew install curl
+        fi
     fi
 
-    if ! command -v brew &> /dev/null; then
-        log_info "安装 Homebrew..."
-        /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-        eval "$(brew shellenv)"
+    # Node.js 仅在本地模式需要
+    if [ "$USE_LOCAL" = true ]; then
+        if command -v node &> /dev/null; then
+            log_info "Node.js: $(node --version) ✓"
+        else
+            log_warn "Node.js: 未找到 (本地模式需要)"
+        fi
     fi
 
-    log_info "安装 Node.js..."
-    brew install node
-
-    if command -v node &> /dev/null && command -v npm &> /dev/null; then
-        log_info "Node.js 安装成功 ✓"
-    else
-        log_error "Node.js 安装失败，请手动安装: https://nodejs.org"
-        exit 1
-    fi
     echo ""
 }
 
@@ -342,6 +324,34 @@ copy_configs() {
     echo ""
 }
 
+# 下载插件文件
+download_plugin() {
+    log_info "从 GitHub 下载插件..."
+
+    # 构建 GitHub RAW 文件 URL
+    local base_url="https://raw.githubusercontent.com/${GITHUB_REPO}/main"
+
+    # 下载 main.js
+    log_info "下载 main.js..."
+    if ! curl -sL "${base_url}/main.js" -o "${PLUGIN_DIR}/main.js"; then
+        log_error "main.js 下载失败"
+        return 1
+    fi
+
+    # 下载 main.css
+    log_info "下载 main.css..."
+    curl -sL "${base_url}/main.css" -o "${PLUGIN_DIR}/main.css" 2>/dev/null || true
+
+    # 下载 manifest.json
+    log_info "下载 manifest.json..."
+    if ! curl -sL "${base_url}/manifest.json" -o "${PLUGIN_DIR}/manifest.json"; then
+        log_error "manifest.json 下载失败"
+        return 1
+    fi
+
+    return 0
+}
+
 # 安装插件
 install_plugin() {
     log_step "安装 LifeWiki 插件..."
@@ -349,21 +359,25 @@ install_plugin() {
     PLUGIN_DIR="${VAULT_PATH}/.obsidian/plugins/${PLUGIN_NAME}"
     mkdir -p "$PLUGIN_DIR"
 
-    if [ "$SKIP_BUILD" = true ]; then
-        log_info "复制预编译文件..."
+    if [ "$USE_LOCAL" = true ]; then
+        log_info "使用本地构建文件..."
         cp "${SCRIPT_DIR}/main.js" "$PLUGIN_DIR/" || { log_error "main.js 复制失败"; exit 1; }
         cp "${SCRIPT_DIR}/main.css" "$PLUGIN_DIR/" 2>/dev/null || true
+        cp "${SCRIPT_DIR}/manifest.json" "$PLUGIN_DIR/" || { log_error "manifest.json 复制失败"; exit 1; }
     else
-        # 源码模式：构建并复制编译后的文件
-        log_info "构建插件..."
-        cd "$SCRIPT_DIR" && npm run build 2>/dev/null || { log_error "构建失败"; exit 1; }
-
-        log_info "复制编译文件..."
-        cp "${SCRIPT_DIR}/main.js" "$PLUGIN_DIR/" || { log_error "main.js 复制失败"; exit 1; }
-        cp "${SCRIPT_DIR}/main.css" "$PLUGIN_DIR/" 2>/dev/null || true
+        # 从 GitHub 下载
+        if ! download_plugin; then
+            log_warn "下载失败，尝试使用本地文件..."
+            if [ -f "${SCRIPT_DIR}/main.js" ]; then
+                cp "${SCRIPT_DIR}/main.js" "$PLUGIN_DIR/"
+                cp "${SCRIPT_DIR}/main.css" "$PLUGIN_DIR/" 2>/dev/null || true
+                cp "${SCRIPT_DIR}/manifest.json" "$PLUGIN_DIR/"
+            else
+                log_error "无法获取插件文件"
+                exit 1
+            fi
+        fi
     fi
-
-    cp "${SCRIPT_DIR}/manifest.json" "$PLUGIN_DIR/" 2>/dev/null || { log_error "manifest.json 复制失败"; exit 1; }
 
     if [ -f "$PLUGIN_DIR/main.js" ] && [ -f "$PLUGIN_DIR/manifest.json" ]; then
         log_info "插件安装完成 ✓"
