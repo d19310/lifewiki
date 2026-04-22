@@ -758,6 +758,9 @@ ${this.state.messages.slice(-4).map((m: any) => {
 				case 'process_entities':
 					result = await this.tools.processEntities(call.args);
 					break;
+				case 'update_block_metadata':
+					result = await this.tools.updateBlockMetadata(call.args);
+					break;
 				default:
 					result = { success: false, error: `Unknown tool: ${call.name}` };
 			}
