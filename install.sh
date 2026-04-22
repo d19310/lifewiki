@@ -283,8 +283,8 @@ EOF
     echo ""
 }
 
-# 复制配置文件
-copy_configs() {
+# 复制配置文件（本地模式）
+copy_configs_local() {
     log_step "复制配置文件..."
 
     # Agent 配置
@@ -304,6 +304,55 @@ copy_configs() {
         cp "${SCRIPT_DIR}/src/.lifewiki/templates/"*.md "${VAULT_PATH}/.lifewiki/templates/" 2>/dev/null || true
         log_info "模板文件 ✓"
     fi
+
+    echo ""
+}
+
+# 下载配置文件
+download_configs() {
+    log_step "下载配置文件..."
+
+    mkdir -p "${VAULT_PATH}/.lifewiki/agents"
+    mkdir -p "${VAULT_PATH}/.lifewiki/skills"
+    mkdir -p "${VAULT_PATH}/.lifewiki/templates"
+
+    # 下载 agents 目录
+    log_info "下载 Agent 配置..."
+    for file in "chat/IDENTITY.md" "chat/SKILL.md" "chat/SOUL.md" "chat/WIKI.md" "diary/IDENTITY.md" "diary/SKILL.md" "diary/SOUL.md" "diary/WIKI.md"; do
+        local path=".lifewiki/agents/${file}"
+        local dir=$(dirname "${VAULT_PATH}/.lifewiki/agents/${file}")
+        mkdir -p "$dir"
+        if gh api repos/${GITHUB_REPO}/contents/${path} --jq '.content' 2>/dev/null | base64 -d > "${VAULT_PATH}/.lifewiki/agents/${file}"; then
+            : # 成功
+        fi
+    done
+    log_info "Agent 配置 ✓"
+
+    # 下载 skills 目录
+    log_info "下载 Skill 配置..."
+    local skills_list=$(gh api repos/${GITHUB_REPO}/contents/.lifewiki/skills --jq '.[].path' 2>/dev/null)
+    for path in $skills_list; do
+        if [[ "$path" == *.md || "$path" == *executor.ts || "$path" == *rules-prompt.ts ]]; then
+            local file="${path##.lifewiki/skills/}"
+            local dir=$(dirname "${VAULT_PATH}/.lifewiki/skills/${file}")
+            mkdir -p "$dir"
+            if gh api repos/${GITHUB_REPO}/contents/${path} --jq '.content' 2>/dev/null | base64 -d > "${VAULT_PATH}/.lifewiki/skills/${file}"; then
+                : # 成功
+            fi
+        fi
+    done
+    log_info "Skill 配置 ✓"
+
+    # 下载 templates
+    log_info "下载模板文件..."
+    local templates_list=$(gh api repos/${GITHUB_REPO}/contents/src/.lifewiki/templates --jq '.[].path' 2>/dev/null)
+    for path in $templates_list; do
+        local file="${path##src/.lifewiki/templates/}"
+        if gh api repos/${GITHUB_REPO}/contents/${path} --jq '.content' 2>/dev/null | base64 -d > "${VAULT_PATH}/.lifewiki/templates/${file}"; then
+            : # 成功
+        fi
+    done
+    log_info "模板文件 ✓"
 
     echo ""
 }
@@ -504,7 +553,11 @@ main() {
     final_summary
 
     create_vault
-    copy_configs
+    if [ "$USE_LOCAL" = true ]; then
+        copy_configs_local
+    else
+        download_configs
+    fi
     install_plugin
 
     echo ""
