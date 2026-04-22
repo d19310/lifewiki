@@ -163,34 +163,18 @@ check_obsidian() {
 check_dependencies() {
     log_step "检查依赖环境..."
 
-    # 检查 curl (用于下载插件)
-    if command -v curl &> /dev/null; then
-        log_info "curl: 已安装 ✓"
+    # 检查 gh CLI (用于从 GitHub 下载插件)
+    if command -v gh &> /dev/null; then
+        log_info "gh CLI: 已安装 ✓"
     else
-        log_warn "curl: 未找到"
-        echo ""
-        echo "LifeWiki 安装脚本需要 curl 来下载插件。"
-        echo ""
-        read -p "是否通过 Homebrew 安装 curl? (y/n) " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
-            if ! command -v brew &> /dev/null; then
-                log_info "安装 Homebrew..."
-                /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-                eval "$(brew shellenv)"
-            fi
-            log_info "安装 curl..."
-            brew install curl
-        fi
+        log_warn "gh CLI: 未找到 (下载插件需要)"
     fi
 
-    # Node.js 仅在本地模式需要
-    if [ "$USE_LOCAL" = true ]; then
-        if command -v node &> /dev/null; then
-            log_info "Node.js: $(node --version) ✓"
-        else
-            log_warn "Node.js: 未找到 (本地模式需要)"
-        fi
+    # 检查 git
+    if command -v git &> /dev/null; then
+        log_info "git: $(git --version | cut -d' ' -f1-3) ✓"
+    else
+        log_warn "git: 未找到"
     fi
 
     echo ""
@@ -328,23 +312,38 @@ copy_configs() {
 download_plugin() {
     log_info "从 GitHub 下载插件..."
 
-    # 构建 GitHub RAW 文件 URL
-    local base_url="https://raw.githubusercontent.com/${GITHUB_REPO}/main"
+    # 检查 gh CLI
+    if ! command -v gh &> /dev/null; then
+        echo ""
+        echo "需要 gh CLI 来下载插件文件。"
+        echo ""
+        read -p "是否通过 Homebrew 安装 gh? (y/n) " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            if ! command -v brew &> /dev/null; then
+                log_info "安装 Homebrew..."
+                /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+                eval "$(brew shellenv)"
+            fi
+            log_info "安装 gh..."
+            brew install gh
+        else
+            log_error "需要 gh CLI。请访问 https://cli.github.com 安装"
+            return 1
+        fi
+    fi
 
-    # 下载 main.js
-    log_info "下载 main.js..."
-    if ! curl -sL "${base_url}/main.js" -o "${PLUGIN_DIR}/main.js"; then
+    log_info "使用 gh CLI 下载..."
+    if ! gh api repos/${GITHUB_REPO}/contents/main.js --jq '.content' | base64 -d > "${PLUGIN_DIR}/main.js" 2>/dev/null; then
         log_error "main.js 下载失败"
         return 1
     fi
 
-    # 下载 main.css
-    log_info "下载 main.css..."
-    curl -sL "${base_url}/main.css" -o "${PLUGIN_DIR}/main.css" 2>/dev/null || true
+    if gh api repos/${GITHUB_REPO}/contents/main.css --jq '.content' 2>/dev/null | base64 -d > "${PLUGIN_DIR}/main.css"; then
+        log_info "main.css 下载完成"
+    fi
 
-    # 下载 manifest.json
-    log_info "下载 manifest.json..."
-    if ! curl -sL "${base_url}/manifest.json" -o "${PLUGIN_DIR}/manifest.json"; then
+    if ! gh api repos/${GITHUB_REPO}/contents/manifest.json --jq '.content' | base64 -d > "${PLUGIN_DIR}/manifest.json" 2>/dev/null; then
         log_error "manifest.json 下载失败"
         return 1
     fi
