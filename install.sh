@@ -449,7 +449,7 @@ final_summary() {
     echo ""
     echo "Vault 路径: ${VAULT_PATH}"
     echo "插件目录: ${VAULT_PATH}/.obsidian/plugins/${PLUGIN_NAME}"
-    [ "$SKIP_BUILD" = true ] && echo "模式: 跳过构建 (使用预编译文件)" || echo "模式: 源码模式"
+    [ "$USE_LOCAL" = true ] && echo "模式: 本地文件" || echo "模式: 从 GitHub 下载"
     [ "$USE_BRAT" = true ] && echo "安装方式: BRAT (从 GitHub)"
     echo ""
     read -p "确认开始安装? (y/n) " -n 1 -r
