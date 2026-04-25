@@ -3,7 +3,7 @@
  * Tests for enhanced detection with inferred type auto-confirmation
  */
 
-import { detectEntitiesExecutor, clearEntityIndexCache, DetectEntitiesInput } from '../../../.lifewiki/skills/detect_entities/executor';
+import { detectEntitiesExecutor, DetectEntitiesInput } from '../../../.lifewiki/skills/detect_entities/executor';
 
 // Mock EntityManager
 function createMockEntityManager(entities: any[] = []) {
@@ -12,6 +12,7 @@ function createMockEntityManager(entities: any[] = []) {
     getEntitiesByType: jest.fn().mockImplementation((type: string) => {
       return Promise.resolve(entities.filter(e => e.type === type));
     }),
+    getAllEntities: jest.fn().mockReturnValue(entities),
     getEntity: jest.fn().mockImplementation((id: string) => {
       return entities.find(e => e.id === id) || null;
     }),
@@ -64,14 +65,26 @@ const mockEntities = [
 ];
 
 describe('detect_entities executor - enhanced features', () => {
-  beforeEach(() => {
-    clearEntityIndexCache();
-  });
-
   describe('inferred type auto-confirmation', () => {
     it('should include autoConfirmed=true for high confidence inferred types', async () => {
       const mockManager = createMockEntityManager([]);
-      const context = { entityManager: mockManager };
+      const context = {
+        entityManager: mockManager,
+        aiProvider: {
+          chat: jest.fn().mockResolvedValue({
+            content: JSON.stringify({
+              entities: [
+                {
+                  name: 'Alpha项目',
+                  inferredType: 'project',
+                  confidence: 0.9,
+                  reason: '包含项目关键词'
+                }
+              ]
+            })
+          })
+        }
+      };
 
       // Use text with project keyword - 项目 should get high confidence
       const input: DetectEntitiesInput = {
@@ -95,7 +108,29 @@ describe('detect_entities executor - enhanced features', () => {
 
     it('should mark English capitalized names with low confidence', async () => {
       const mockManager = createMockEntityManager([]);
-      const context = { entityManager: mockManager };
+      const context = {
+        entityManager: mockManager,
+        aiProvider: {
+          chat: jest.fn().mockResolvedValue({
+            content: JSON.stringify({
+              entities: [
+                {
+                  name: 'Alice',
+                  inferredType: 'person',
+                  confidence: 0.6,
+                  reason: '英文名，低置信度'
+                },
+                {
+                  name: 'Bob',
+                  inferredType: 'person',
+                  confidence: 0.6,
+                  reason: '英文名，低置信度'
+                }
+              ]
+            })
+          })
+        }
+      };
 
       // English names without strong patterns
       const input: DetectEntitiesInput = {

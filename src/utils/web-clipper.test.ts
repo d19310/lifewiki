@@ -61,6 +61,18 @@ class MockElement {
 		return this._html;
 	}
 
+	get nodeValue(): string | null {
+		return this.nodeType === 3 ? this.textContent : null;
+	}
+
+	set nodeValue(value: string | null) {
+		this.textContent = value || '';
+	}
+
+	get data(): string {
+		return this.textContent;
+	}
+
 	set innerHTML(html: string) {
 		this._html = html;
 		this._childNodes = [];
@@ -80,7 +92,7 @@ class MockElement {
 		let remaining = html.trim();
 
 		// Match opening tag with attributes and closing tag
-		const tagRegex = /<(\w+)([^>]*)>([\s\S]*?)<\/\1>|<(\w+)([^>]*)\/>/gi;
+		const tagRegex = /<(\w+)([^>]*)>([\s\S]*?)<\/\1>|<(\w+)([^>]*)\/>|<(meta|br|img|hr|input)([^>]*)>/gi;
 
 		while (remaining.length > 0) {
 			const beforeMatch = remaining;
@@ -111,12 +123,14 @@ class MockElement {
 				elements.push(textEl);
 			}
 
-			if (match[4]) {
+			if (match[4] || match[6]) {
 				// Self-closing tag like <br/>
-				const el = new MockElement(match[4]);
-				el.nodeName = match[4].toUpperCase();
+				const tagName = match[4] || match[6];
+				const attrs = match[5] || match[7] || '';
+				const el = new MockElement(tagName);
+				el.nodeName = tagName.toUpperCase();
 				el.parentNode = this;
-				this.parseAttributes(match[5] || '', el);
+				this.parseAttributes(attrs, el);
 				elements.push(el);
 			} else {
 				// Regular tag
@@ -127,6 +141,7 @@ class MockElement {
 
 				// Check if content contains nested tags
 				const content = match[3];
+				el._html = content;
 				if (content.includes('<')) {
 					el._childNodes = el.parseHTML(content);
 					el.children = el._childNodes.filter(c => c.nodeType === 1);
@@ -151,7 +166,7 @@ class MockElement {
 	}
 
 	private parseAttributes(attrStr: string, el: MockElement): void {
-		const attrRegex = /(\w+)="([^"]*)"/g;
+		const attrRegex = /([\w:-]+)="([^"]*)"/g;
 		let match;
 		while ((match = attrRegex.exec(attrStr)) !== null) {
 			const name = match[1];

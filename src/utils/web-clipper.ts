@@ -88,6 +88,24 @@ function parseHtmlToDOM(html: string): Element {
 	return container;
 }
 
+function getMetaContentFromHtml(html: string, attr: 'name' | 'property', value: string): string | undefined {
+	const metaRegex = new RegExp(`<meta\\b(?=[^>]*\\b${attr}=["']${escapeRegExp(value)}["'])(?=[^>]*\\bcontent=["']([^"']+)["'])[^>]*>`, 'i');
+	const match = html.match(metaRegex);
+	return match?.[1]?.trim();
+}
+
+function getElementTextFromHtml(html: string, selector: { id?: string; className?: string }): string | undefined {
+	const attr = selector.id ? `id=["']${escapeRegExp(selector.id)}["']` : `class=["'][^"']*\\b${escapeRegExp(selector.className || '')}\\b[^"']*["']`;
+	const regex = new RegExp(`<([a-zA-Z0-9]+)\\b(?=[^>]*${attr})[^>]*>([\\s\\S]*?)<\\/\\1>`, 'i');
+	const match = html.match(regex);
+	if (!match?.[2]) return undefined;
+	return match[2].replace(/<[^>]+>/g, '').trim();
+}
+
+function escapeRegExp(value: string): string {
+	return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 /**
  * Extract text content from an element
  */
@@ -153,13 +171,13 @@ async function clipGenericWebpage(url: string): Promise<ClipResult> {
 	const doc = parseHtmlToDOM(html);
 
 	// Extract title
-	result.title = extractTitle(doc);
+	result.title = extractTitle(doc, html);
 
 	// Extract author from meta tags
-	result.author = extractAuthor(doc);
+	result.author = extractAuthor(doc, html);
 
 	// Extract site name
-	result.siteName = extractSiteName(doc);
+	result.siteName = extractSiteName(doc, html);
 
 	// Extract main content using Readability-style extraction
 	const content = extractMainContent(doc);
@@ -205,11 +223,17 @@ async function clipWechatArticle(url: string): Promise<ClipResult> {
 		if (titleEl) {
 			result.title = titleEl.textContent?.trim() || '';
 		}
+		if (!result.title) {
+			result.title = getElementTextFromHtml(html, { className: 'rich_media_title' }) || '';
+		}
 
 		// Author: id="js_name"
 		const authorEl = doc.querySelector('#js_name');
 		if (authorEl) {
 			result.author = authorEl.textContent?.trim() || '';
+		}
+		if (!result.author) {
+			result.author = getElementTextFromHtml(html, { id: 'js_name' });
 		}
 
 		// Content: id="js_content"
@@ -254,17 +278,25 @@ async function clipWechatArticle(url: string): Promise<ClipResult> {
 /**
  * Extract title from document
  */
-function extractTitle(doc: Element): string {
+function extractTitle(doc: Element, html?: string): string {
 	// Try Open Graph title first
 	const ogTitle = doc.querySelector('meta[property="og:title"]');
 	if (ogTitle?.getAttribute('content')) {
 		return ogTitle.getAttribute('content')!.trim();
+	}
+	const ogTitleFromHtml = html ? getMetaContentFromHtml(html, 'property', 'og:title') : undefined;
+	if (ogTitleFromHtml) {
+		return ogTitleFromHtml;
 	}
 
 	// Try Twitter title
 	const twitterTitle = doc.querySelector('meta[name="twitter:title"]');
 	if (twitterTitle?.getAttribute('content')) {
 		return twitterTitle.getAttribute('content')!.trim();
+	}
+	const twitterTitleFromHtml = html ? getMetaContentFromHtml(html, 'name', 'twitter:title') : undefined;
+	if (twitterTitleFromHtml) {
+		return twitterTitleFromHtml;
 	}
 
 	// Fall back to <title> tag
@@ -285,15 +317,23 @@ function extractTitle(doc: Element): string {
 /**
  * Extract author from meta tags
  */
-function extractAuthor(doc: Element): string | undefined {
+function extractAuthor(doc: Element, html?: string): string | undefined {
 	const authorMeta = doc.querySelector('meta[name="author"]');
 	if (authorMeta?.getAttribute('content')) {
 		return authorMeta.getAttribute('content')!.trim();
+	}
+	const authorFromHtml = html ? getMetaContentFromHtml(html, 'name', 'author') : undefined;
+	if (authorFromHtml) {
+		return authorFromHtml;
 	}
 
 	const articleAuthor = doc.querySelector('meta[property="article:author"]');
 	if (articleAuthor?.getAttribute('content')) {
 		return articleAuthor.getAttribute('content')!.trim();
+	}
+	const articleAuthorFromHtml = html ? getMetaContentFromHtml(html, 'property', 'article:author') : undefined;
+	if (articleAuthorFromHtml) {
+		return articleAuthorFromHtml;
 	}
 
 	return undefined;
@@ -302,10 +342,14 @@ function extractAuthor(doc: Element): string | undefined {
 /**
  * Extract site name from meta tags
  */
-function extractSiteName(doc: Element): string | undefined {
+function extractSiteName(doc: Element, html?: string): string | undefined {
 	const ogSiteName = doc.querySelector('meta[property="og:site_name"]');
 	if (ogSiteName?.getAttribute('content')) {
 		return ogSiteName.getAttribute('content')!.trim();
+	}
+	const ogSiteNameFromHtml = html ? getMetaContentFromHtml(html, 'property', 'og:site_name') : undefined;
+	if (ogSiteNameFromHtml) {
+		return ogSiteNameFromHtml;
 	}
 
 	return undefined;

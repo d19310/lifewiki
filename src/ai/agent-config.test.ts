@@ -20,15 +20,15 @@ describe('AgentConfig', () => {
 				identity: '# LifeWiki Agent\n\n你是一个日记分析助手',
 				soul: '# 分析规范\n\n按顺序分析：人脉 -> 项目 -> 物品 -> 想法 -> 知识',
 				skills: '# 技能\n\n- search_entity\n- create_entity',
-				memory: '# 记忆\n\n当前日期: {{date}}',
-				wiki: '# 知识库\n\n目录结构: People/, Projects/, Things/'
+				wiki: '# 知识库\n\n目录结构: People/, Projects/, Things/',
+				chatPrompt: ''
 			};
 
 			expect(config.identity).toContain('LifeWiki Agent');
 			expect(config.soul).toContain('分析规范');
 			expect(config.skills).toContain('search_entity');
-			expect(config.memory).toContain('记忆');
 			expect(config.wiki).toContain('知识库');
+			expect(config.chatPrompt).toBe('');
 		});
 	});
 
@@ -42,8 +42,8 @@ describe('AgentConfig', () => {
 			expect(config.identity).toContain('日记分析助手');
 			expect(config.soul).toContain('分析顺序');
 			expect(config.skills).toContain('search_entity');
-			expect(config.memory).toContain('当前会话上下文');
 			expect(config.wiki).toContain('目录结构');
+			expect(config.chatPrompt).toContain('LifeWiki AI 助手');
 		});
 
 		it('should load identity from IDENTITY.md when exists', async () => {
@@ -75,8 +75,8 @@ describe('AgentConfig', () => {
 				'.lifewiki/agents/diary/IDENTITY.md',
 				'.lifewiki/agents/diary/SOUL.md',
 				'.lifewiki/agents/diary/SKILL.md',
-				'.lifewiki/agents/diary/MEMORY.md',
-				'.lifewiki/agents/diary/WIKI.md'
+				'.lifewiki/agents/diary/WIKI.md',
+				'.lifewiki/agents/diary/CHAT.md'
 			];
 
 			(mockApp.vault.getAbstractFileByPath as jest.Mock).mockImplementation((path: string) => {
@@ -91,8 +91,8 @@ describe('AgentConfig', () => {
 					'.lifewiki/agents/diary/IDENTITY.md': '# IDENTITY',
 					'.lifewiki/agents/diary/SOUL.md': '# SOUL',
 					'.lifewiki/agents/diary/SKILL.md': '# SKILLS',
-					'.lifewiki/agents/diary/MEMORY.md': '# MEMORY',
-					'.lifewiki/agents/diary/WIKI.md': '# WIKI'
+					'.lifewiki/agents/diary/WIKI.md': '# WIKI',
+					'.lifewiki/agents/diary/CHAT.md': '# CHAT'
 				};
 				return contentMap[file.path] || '';
 			});
@@ -102,8 +102,8 @@ describe('AgentConfig', () => {
 			expect(config.identity).toBe('# IDENTITY');
 			expect(config.soul).toBe('# SOUL');
 			expect(config.skills).toBe('# SKILLS');
-			expect(config.memory).toBe('# MEMORY');
 			expect(config.wiki).toBe('# WIKI');
+			expect(config.chatPrompt).toBe('# CHAT');
 		});
 
 		it('should handle partial file loading', async () => {
