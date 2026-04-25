@@ -23,6 +23,7 @@ export interface AgentResult {
 	response: string;
 	session: BlockSession;
 	entities?: DiscoveredEntity[];
+	areas?: string[];
 	error?: string;
 }
 

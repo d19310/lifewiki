@@ -1,7 +1,7 @@
 {
   "name": "lifewiki",
-  "version": "0.1.0",
-  "description": "AI-powered daily journal analysis with entity extraction for Obsidian",
+  "version": "2.0.0",
+  "description": "Obsidian personal memory system that extracts tacit knowledge from daily journals for humans and agents",
   "main": "main.js",
   "scripts": {
     "dev": "node esbuild.config.mjs",
@@ -15,12 +15,16 @@
     "plugin",
     "journal",
     "ai",
-    "knowledge-management"
+    "knowledge-management",
+    "personal-memory",
+    "agent-memory",
+    "tacit-knowledge"
   ],
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "@langchain/core": "^0.3.0",
+    "@langchain/core": "^1.1.40",
+    "@langchain/langgraph": "^1.2.9",
     "jsdom": "^29.0.2",
     "turndown": "^7.2.4",
     "zod": "^3.23.0"

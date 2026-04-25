@@ -3,6 +3,8 @@
  * Core type definitions for LifeWiki entities
  */
 
+import type { BlockMemoryAnalysis } from '../memory/types';
+
 export type EntityType = 'person' | 'project' | 'thing' | 'idea' | 'knowledge';
 
 export interface ChatMessage {
@@ -76,6 +78,7 @@ export interface Block {
 	areas: string[];        // Areas/tags, e.g. ['工作', '学习']
 	source: 'Lifewiki' | string;  // Channel/source
 	aiAnalysis?: AnalysisResult;
+	aiMemoryAnalysis?: BlockMemoryAnalysis;
 }
 
 export interface AnalysisResult {
@@ -95,6 +98,21 @@ export interface AnalysisResult {
 	aiResponse: string;
 }
 
+export interface ParsedBlock {
+	id: string;
+	timestamp: string;
+	source: string;
+	category: string;
+	content: string;
+	children: Array<{
+		id: string;
+		timestamp: string;
+		content: string;
+		parentId: string;
+	}>;
+	parentId: string | null;
+}
+
 export interface EntityPreview {
 	type: EntityType;
 	name: string;
@@ -106,7 +124,7 @@ export interface EntityPreview {
 
 /**
  * Analysis phases for progressive entity analysis
- * Order: people -> projects -> things -> ideas -> knowledge -> complete
+ * 5-step flow: detection -> processing -> relations -> conflicts -> summary -> complete
  */
 export enum AnalysisPhase {
 	People = 'people',
@@ -114,6 +132,11 @@ export enum AnalysisPhase {
 	Things = 'things',
 	Ideas = 'ideas',
 	Knowledge = 'knowledge',
+	Detection = 'detection',   // Step 1: Detect all entities
+	Processing = 'processing', // Step 2: Create/update entities with user confirmation
+	Relations = 'relations',    // Step 3: Discover and link entity relations
+	Conflicts = 'conflicts',    // Step 4: Detect and resolve conflicts
+	Summary = 'summary',       // Step 5: Generate summary with area tags
 	Complete = 'complete'
 }
 
@@ -125,6 +148,12 @@ export interface BlockSession {
 	content: string;           // Original diary content for this block
 	messages: ChatMessage[];
 	analysisResult: AnalysisResult | null;
+	memoryAnalysis?: BlockMemoryAnalysis | null;
+	reviewCards?: Record<string, {
+		status: 'pending' | 'confirmed' | 'skipped';
+		supplement?: string;
+		updatedAt: string;
+	}>;
 	createdAt: string;       // ISO 8601
 	updatedAt: string;       // ISO 8601
 	currentPhase: AnalysisPhase;

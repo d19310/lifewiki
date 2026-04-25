@@ -140,7 +140,8 @@ export class EntityTools {
 	constructor(
 		private entityManager: EntityManager,
 		private blockId: string,
-		private app?: App
+		private app?: App,
+		private aiProvider?: AIProvider
 	) {}
 
 	/**
@@ -193,10 +194,27 @@ export class EntityTools {
 	}
 
 	/**
+	 * Normalize entity type (handle plural forms)
+	 */
+	private normalizeEntityType(type: string): string {
+		const typeMap: Record<string, string> = {
+			'人脉': 'person', 'person': 'person', 'people': 'person',
+			'项目': 'project', 'project': 'project', 'projects': 'project',
+			'物品': 'thing', 'thing': 'thing', 'things': 'thing',
+			'想法': 'idea', 'idea': 'idea', 'ideas': 'idea',
+			'知识': 'knowledge', 'knowledge': 'knowledge'
+		};
+		return typeMap[type.toLowerCase()] || type;
+	}
+
+	/**
 	 * Create a new entity
 	 */
 	async createEntity(input: CreateEntityInput): Promise<ToolExecutionResult> {
 		try {
+			// Normalize entity type (AI might send plural forms like "people")
+			const normalizedType = this.normalizeEntityType(input.entityType);
+
 			// Build metadata with source info if provided
 			const metadata = { ...(input.metadata || {}) };
 			if (input.sourceDocument) {
@@ -209,7 +227,7 @@ export class EntityTools {
 			metadata.source = metadata.source || 'document_archive';
 
 			const entity = await this.entityManager.createEntity({
-				type: input.entityType,
+				type: normalizedType,
 				title: input.name,
 				titleRaw: input.name,
 				aliases: [],
@@ -774,7 +792,8 @@ export class EntityTools {
 			const context = {
 				entityManager: this.entityManager,
 				app: this.app,
-				blockId: this.blockId
+				blockId: this.blockId,
+				aiProvider: this.aiProvider
 			};
 
 			return await detectEntitiesExecutor(context as any, input);
@@ -800,6 +819,36 @@ export class EntityTools {
 			return await processEntitiesExecutor(context as any, input);
 		} catch (error) {
 			return { success: false, error: `Process entities failed: ${(error as Error).message}` };
+		}
+	}
+
+	async detectConflicts(input: { entityId: string; diaryContent: string; options?: { checkFields?: string[]; strictMode?: boolean } }): Promise<ToolExecutionResult> {
+		try {
+			const { detectConflictsExecutor } = await import('../skills-registry');
+			const context = {
+				entityManager: this.entityManager,
+				app: this.app,
+				blockId: this.blockId,
+				aiProvider: this.aiProvider
+			};
+			return await detectConflictsExecutor(context as any, input);
+		} catch (error) {
+			return { success: false, error: `Detect conflicts failed: ${(error as Error).message}` };
+		}
+	}
+
+	async processUpdates(input: { updates: Array<{ entityId: string; changes: Record<string, any>; reason?: string }>; options?: { skipOnError?: boolean } }): Promise<ToolExecutionResult> {
+		try {
+			const { processUpdatesExecutor } = await import('../skills-registry');
+			const context = {
+				entityManager: this.entityManager,
+				app: this.app,
+				blockId: this.blockId,
+				aiProvider: this.aiProvider
+			};
+			return await processUpdatesExecutor(context as any, input);
+		} catch (error) {
+			return { success: false, error: `Process updates failed: ${(error as Error).message}` };
 		}
 	}
 

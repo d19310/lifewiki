@@ -1,4 +1,4 @@
-# LifeWiki 产品规格文档 V2.0
+# LifeWiki 产品规格文档 V1.7
 
 ## 1. 产品概述
 
@@ -476,3 +476,274 @@ Vault/
 ### Section 3: 功能设置
 
 （预留，目前为空）
+
+---
+
+## 8. v1.7 重大更新：优化分析流程与实体索引
+
+### 8.1 背景与问题
+
+**原有问题**：
+- 日记分析流程（5步）调用 agent 配置文件（IDENTITY.md/SOUL.md）效果不稳定
+- 每次分析需要多次调用 `list_entities`、`search_entity`，效率低
+- 大量实体需要传递时，token 消耗大
+- MiniMax 等模型不支持 function calling，导致流程无法完整执行
+
+**解决思路**：
+- 日记分析模式：使用简化的内嵌 prompt，速度快、效果稳定
+- Chat 模式：保留 agent 配置，支持 function calling 等完整能力
+- 实体索引：HashMap + Trie 实现 O(1)/O(m) 级别检索
+- 操作分类：自动执行 vs 需用户确认
+
+### 8.2 双模式架构
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      LangGraphAgent                         │
+├─────────────────────────────────────────────────────────────┤
+│                                                              │
+│  ┌─────────────────────┐    ┌─────────────────────┐        │
+│  │   分析模式           │    │   聊天模式            │        │
+│  │   (diary blocks)    │    │   (chat:global)      │        │
+│  ├─────────────────────┤    ├─────────────────────┤        │
+│  │ buildAnalysisPrompt │    │ buildSystemPrompt   │        │
+│  │ (内嵌简化 prompt)    │    │ (加载 MD 配置文件)  │        │
+│  │ 无 function calling │    │ 支持 function calling│       │
+│  │ 直接文本输出        │    │ XML 格式调用         │        │
+│  └─────────────────────┘    └─────────────────────┘        │
+│                                                              │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**分析模式 Prompt** (`buildAnalysisPrompt`):
+```
+# 日记分析助手
+
+## 对话风格
+像朋友聊天一样自然，简洁。不说"检测到"、"发现"，直接说名字。
+
+## 5步分析流程
+### Step 1: 快速浏览日记，识别提及的人
+### Step 2: 识别提到的项目/任务/想法
+### Step 3: 判断领域
+### Step 4: 直接回复（末尾带 #工作/#个人 等标签）
+```
+
+**聊天模式**：加载 `.lifewiki/agents/chat/` 下的完整配置，支持 skills 调用。
+
+### 8.3 实体索引（Entity Index）
+
+**目的**：优化实体检索性能，从 O(k×n) 降低到 O(k) 或 O(m)。
+
+**索引结构**：
+```
+EntityIndex
+├── nameToEntity: Map<string, Entity>      // O(1) 精确匹配
+├── trie: Trie                               // O(m) 前缀匹配
+├── aliases: Map<string, Entity>             // 别名反向索引
+└── simplifiedNames: Map<string, Entity>     // 简繁转换索引
+```
+
+**匹配流程**：
+```
+检测流程：
+1. 精确匹配 (HashMap)     → O(1)
+2. 别名匹配 (遍历)         → O(k)
+3. 简繁转换匹配            → O(k)
+4. Trie 前缀匹配          → O(m)
+5. 编辑距离过滤           → O(k×n)，只对候选执行
+```
+
+**核心模块**：
+
+`src/ai/langgraph/entity-index.ts`:
+```typescript
+export class EntityIndex {
+  private nameToEntity: Map<string, Entity>;
+  private trie: Trie;
+  private aliases: Map<string, Entity>;
+  private simplifiedNames: Map<string, Entity>;
+
+  buildIndex(entities: Entity[]): void;
+  findExact(name: string): Entity | null;
+  findExactBatch(names: string[]): Map<string, Entity | null>;
+  findByPrefix(prefix: string, limit?: number): Entity[];
+  findByEditDistance(name: string, threshold?: number): Entity[];
+}
+```
+
+`src/ai/langgraph/string-matcher.ts`:
+```typescript
+export function levenshteinDistance(a: string, b: string): number;
+export function stringSimilarity(a: string, b: string): number;
+export function simplifiedToTraditional(s: string): string;
+export function traditionalToSimplified(s: string): string;
+```
+
+### 8.4 操作分类与确认机制
+
+**操作分类**：
+
+| 操作类型 | 说明 | 执行方式 |
+|---------|------|---------|
+| `add_interaction` | 已归档实体添加互动记录 | **自动执行** |
+| `create_entity` | 创建新实体档案 | **需确认** |
+| `link_entities` | 建立实体间双链关系 | **需确认** |
+| `update_entity` | 更新已有实体（冲突处理） | **需确认** |
+
+**确认触发格式**：
+
+AI 输出确认格式（结构化文本）：
+```
+【待确认操作】
+
+新增实体：
+- 张三（人脉）← "张三" 是新朋友吗？
+
+已归档实体互动：
+- 李四：添加到最近互动记录
+
+关联关系：
+- 张三 → 华为项目（负责人）
+
+请确认是否执行以上操作。回复"好"执行，"取消"放弃。
+```
+
+**用户回复解析**：
+
+| 用户回复 | 解析结果 |
+|---------|---------|
+| "好" | confirm_all |
+| "好，但张三改成客户" | confirm_all + 修改张三类型为"客户" |
+| "只创建张三，其他取消" | partial_confirm: [张三] |
+| "取消" | cancel_all |
+
+**操作执行器** (`operation-executor.ts`):
+```typescript
+export interface PendingOperations {
+  createEntities: Array<{ name, entityType, summary? }>;
+  addInteractions: Array<{ entityId, content, sourceBlockId }>;
+  linkRelations: Array<{ entityIdA, entityIdB, relation }>;
+}
+
+export async function executeOperations(
+  ops: PendingOperations,
+  entityManager: EntityManager
+): Promise<ExecutionResult>;
+```
+
+### 8.5 完整对话流程
+
+```
+用户输入日记
+    ↓
+AI 对话 + 自动 add_interaction
+    ↓
+检测到需要确认的操作
+    ↓
+输出【待确认操作】格式
+    ↓
+用户回复"好"或修改
+    ↓
+Backend 执行所有操作
+    ↓
+自动更新 block 元数据（领域标签）
+    ↓
+对话完成
+```
+
+**示例对话**：
+
+```
+用户：今天和张三、李四开会讨论华为项目
+
+AI：张三、李四是新面孔，他们是你的同事吗？#工作
+
+用户：是的，张三是客户，李四是同事
+
+AI：张三（客户）、李四（同事）已归档。华为项目是新的吗？
+
+用户：对
+
+AI：好的，华为项目已创建。
+张三（客户）→ 华为项目（客户项目）
+李四（同事）→ 华为项目（参与）
+#工作
+
+用户：好
+
+Backend 执行：
+- create_entity: 张三（客户）、李四（同事）、华为项目
+- link_entities: 张三→华为、李四→华为
+- update_block_metadata: blockId, { areas: ['工作'] }
+```
+
+### 8.6 文件结构
+
+**新增文件**：
+```
+src/ai/langgraph/
+├── entity-index.ts        # 实体索引（HashMap + Trie）
+├── string-matcher.ts      # 字符串匹配算法
+├── operation-executor.ts   # 操作执行器
+├── user-reply-parser.ts    # 用户回复解析器
+└── confirmation-trigger.ts # 确认触发器
+```
+
+**修改文件**：
+```
+src/ai/langgraph/agent.ts       # 支持双模式
+src/ai/langgraph/graph.ts       # 更新工具定义
+src/entities/manager.ts         # 添加批量查找方法
+```
+
+### 8.7 detect_entities Skill（可选优化）
+
+**目的**：封装实体检测逻辑，AI 只需一次调用完成检测。
+
+**输入**：
+```json
+{
+  "diaryContent": "今天和张三、李四开会讨论华为项目...",
+  "entityIndexSummary": [{"name": "张三", "type": "person"}, ...],
+  "options": { "enableFuzzyMatch": true, "similarityThreshold": 0.8 }
+}
+```
+
+**输出**：
+```json
+{
+  "archivedMatches": [
+    {"name": "张三", "entityId": "xxx", "type": "person", "matchType": "exact"}
+  ],
+  "newEntities": [
+    {"name": "李四", "inferredType": "person", "confidence": 0.9}
+  ],
+  "localFiles": ["~/documents/项目笔记.md"],
+  "webLinks": ["https://example.com/article"]
+}
+```
+
+### 8.8 验证方式
+
+1. `npm run build` — 无 TypeScript 错误
+2. 性能测试：对比优化前后检测耗时
+3. Token 测试：对比优化前后 prompt token 消耗
+4. 功能测试：验证别名、简繁、编辑距离匹配正确
+
+### 8.9 实施步骤
+
+**Phase 1: 基础优化**
+1. [ ] 创建 `string-matcher.ts`
+2. [ ] 创建 `entity-index.ts`
+3. [ ] 修改 `EntityManager` 添加 `buildEntityIndex()` 和 `findExactBatch()`
+
+**Phase 2: 确认机制**
+4. [ ] 创建 `user-reply-parser.ts`
+5. [ ] 创建 `operation-executor.ts`
+6. [ ] 创建 `confirmation-trigger.ts`
+
+**Phase 3: Agent 集成**
+7. [ ] 更新 `agent.ts` 双模式支持
+8. [ ] 更新 `graph.ts` 工具定义
+9. [ ] 测试完整流程

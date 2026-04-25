@@ -210,14 +210,21 @@ export class EntityIndex {
 
     // Step 4: Edit distance match (only for candidates)
     // Only search if name is short enough to be a potential entity name
+    // Require higher confidence for edit distance matches (threshold 1, not 2)
     if (name.length >= 2 && name.length <= 6) {
-      const editDistanceMatch = this.findByEditDistance(name);
-      if (editDistanceMatch) {
-        return {
-          entity: editDistanceMatch,
-          matchType: 'edit_distance',
-          confidence: 0.6
-        };
+      const editDistanceResult = this.findByEditDistance(name, 1);
+      if (editDistanceResult.entity && editDistanceResult.distance !== null) {
+        // Calculate confidence based on edit distance and name length
+        // distance 0 = confidence 1.0, distance 1 = confidence 0.8 (only for longer names)
+        const baseConfidence = editDistanceResult.distance === 0 ? 1.0 : 0.7;
+        // Only return match if confidence is high enough
+        if (baseConfidence >= 0.7) {
+          return {
+            entity: editDistanceResult.entity,
+            matchType: 'edit_distance',
+            confidence: baseConfidence
+          };
+        }
       }
     }
 
@@ -232,7 +239,7 @@ export class EntityIndex {
   /**
    * Find match by edit distance
    */
-  private findByEditDistance(name: string, threshold: number = 2): Entity | null {
+  private findByEditDistance(name: string, threshold: number = 1): { entity: Entity | null; distance: number | null } {
     let bestMatch: Entity | null = null;
     let bestDistance = Infinity;
 
@@ -254,7 +261,7 @@ export class EntityIndex {
       }
     }
 
-    return bestMatch;
+    return { entity: bestMatch, distance: bestDistance === Infinity ? null : bestDistance };
   }
 
   /**

@@ -5,6 +5,7 @@
 
 import { App, TFile } from 'obsidian';
 import { BlockSession, AnalysisPhase, ChatMessage, AnalysisResult, ChatSession } from '../entities/types';
+import type { BlockMemoryAnalysis } from '../memory/types';
 
 const SESSIONS_FOLDER = '.lifewiki/sessions';
 const CHAT_SESSION_KEY = 'chat:global';
@@ -126,6 +127,30 @@ export class SessionManager {
 	}
 
 	/**
+	 * Replace or create a full block session.
+	 * This is used by LifeWiki 2.0 capture analysis so memoryAnalysis is not
+	 * flattened back into the legacy AnalysisResult shape.
+	 */
+	setSession(blockId: string, session: BlockSession, parentId: string | null = null): BlockSession {
+		const effectiveBlockId = parentId || blockId;
+		const now = new Date().toISOString();
+		const existing = this.sessions.get(effectiveBlockId);
+		const nextSession: BlockSession = {
+			...session,
+			blockId: effectiveBlockId,
+			content: session.content || existing?.content || '',
+			reviewCards: session.reviewCards || existing?.reviewCards,
+			createdAt: session.createdAt || existing?.createdAt || now,
+			updatedAt: now,
+			currentPhase: session.currentPhase || AnalysisPhase.Complete
+		};
+
+		this.sessions.set(effectiveBlockId, nextSession);
+		this.saveSession(effectiveBlockId);
+		return nextSession;
+	}
+
+	/**
 	 * Get session by blockId
 	 * If block is a child block, returns parent's session
 	 */
@@ -179,6 +204,46 @@ export class SessionManager {
 		session.updatedAt = new Date().toISOString();
 		this.saveSession(effectiveBlockId);
 
+		return true;
+	}
+
+	/**
+	 * Set the native LifeWiki 2.0 memory analysis for a session.
+	 */
+	setMemoryAnalysis(blockId: string, result: BlockMemoryAnalysis, parentId: string | null = null): boolean {
+		const effectiveBlockId = parentId || blockId;
+		const session = this.sessions.get(effectiveBlockId);
+		if (!session) return false;
+
+		session.memoryAnalysis = result;
+		session.updatedAt = new Date().toISOString();
+		session.currentPhase = AnalysisPhase.Complete;
+		this.saveSession(effectiveBlockId);
+
+		return true;
+	}
+
+	updateReviewCard(
+		blockId: string,
+		cardId: string,
+		update: { status?: 'pending' | 'confirmed' | 'skipped'; supplement?: string },
+		parentId: string | null = null
+	): boolean {
+		const effectiveBlockId = parentId || blockId;
+		const session = this.sessions.get(effectiveBlockId);
+		if (!session) return false;
+
+		const existing = session.reviewCards?.[cardId];
+		session.reviewCards = {
+			...(session.reviewCards || {}),
+			[cardId]: {
+				status: update.status || existing?.status || 'pending',
+				supplement: update.supplement !== undefined ? update.supplement : existing?.supplement,
+				updatedAt: new Date().toISOString()
+			}
+		};
+		session.updatedAt = new Date().toISOString();
+		this.saveSession(effectiveBlockId);
 		return true;
 	}
 

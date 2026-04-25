@@ -8,13 +8,24 @@ export interface ChatMessage {
 	content: string;
 }
 
+export interface ToolDefinition {
+	name: string;
+	description: string;
+	parameters: Record<string, unknown>;
+}
+
 export interface ChatResponse {
 	content: string;
+	reasoningContent?: string;
 	usage?: {
 		promptTokens: number;
 		completionTokens: number;
 		totalTokens: number;
 	};
+	toolCalls?: Array<{
+		name: string;
+		arguments: string;
+	}>;
 }
 
 /**
@@ -28,7 +39,12 @@ export interface AIProvider {
 	/**
 	 * Send a chat request and receive a response
 	 */
-	chat(messages: ChatMessage[]): Promise<ChatResponse>;
+	chat(messages: ChatMessage[], tools?: ToolDefinition[]): Promise<ChatResponse>;
+
+	streamChat?(
+		messages: ChatMessage[],
+		tools?: ToolDefinition[]
+	): AsyncGenerator<{ content?: string; reasoningContent?: string }, ChatResponse, void>;
 
 	/**
 	 * Check if the provider is ready to use

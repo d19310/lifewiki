@@ -8,7 +8,7 @@
 export class AsyncLocalStorage<T> {
 	private storage = new Map<string, T>();
 
-	run store: T, callback: (...args: any[]) => any, ...args: any[]): any {
+	run<R>(store: T, callback: (...args: any[]) => R, ...args: any[]): R {
 		const id = Math.random().toString(36);
 		this.storage.set(id, store);
 		try {
@@ -31,15 +31,12 @@ export class AsyncLocalStorage<T> {
 
 // Mock for node:async_hooks
 export const createHook = () => {};
-export constAsyncResource = class AsyncResource {
+export const AsyncResource = class AsyncResource {
 	constructor() {}
 	bind<T>(_fn: T): T {
 		return _fn;
 	}
-	runInAsyncScope<T>(_fn: (...args: any[]) => T, _this: any, ..._args: any[]): T {
+	runInAsyncScope<T>(_fn: (...args: any[]) => T, _this?: any, ..._args: any[]): T {
 		return _fn.call(_this, ..._args);
-	}
-	runInAsyncScope(_fn: () => void, _this?: any): void {
-		_fn.call(_this);
 	}
 };

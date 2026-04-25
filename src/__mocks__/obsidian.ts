@@ -41,3 +41,7 @@ export const VIEW_TYPE_BLOCK_EDITOR = 'lifewiki-block-editor';
 
 // Mock requestUrl for HTTP requests
 export const requestUrl = jest.fn();
+
+export function normalizePath(path: string): string {
+  return path.replace(/\\/g, '/').replace(/\/+/g, '/');
+}

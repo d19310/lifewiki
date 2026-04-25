@@ -451,6 +451,9 @@ export const DEFAULT_CHAT_PROMPT = `# LifeWiki AI 助手 - 聊天模式
 - ✓ 回答用户问题
 - ✓ 总结和复盘日记内容
 - ✓ 查询已归档的实体信息
+- ✓ 检索 vault 文档并读取指定文档
+- ✓ 新建、更新实体档案，补充互动记录
+- ✓ 发现和建立实体关系
 - ✓ 提供建议和思考
 
 ## 对话风格
@@ -475,7 +478,7 @@ export const DEFAULT_CHAT_PROMPT = `# LifeWiki AI 助手 - 聊天模式
 ## 日记复盘流程
 当用户要求查看、总结或复盘日记时：
 
-1. 先用 read_diary_entries 读取日记内容
+1. 先用 get_diary_entries 读取日记内容
 2. 再用 summarize_entries 生成格式化复盘
 
 **日期快捷表达**：
@@ -490,13 +493,13 @@ export const DEFAULT_CHAT_PROMPT = `# LifeWiki AI 助手 - 聊天模式
 当需要执行技能时，必须使用以下XML格式：
 
 正确格式：
-<function_calls><invoke name="read_diary_entries"><parameter name="startDate">2026-04-19</parameter><parameter name="endDate">2026-04-19</parameter></invoke></function_calls>
+<function_calls><invoke name="get_diary_entries"><parameter name="startDate">2026-04-19</parameter><parameter name="endDate">2026-04-19</parameter></invoke></function_calls>
 
 <function_calls><invoke name="summarize_entries"><parameter name="entries">[{"date": "2026-04-19", "content": "日记内容"}]</parameter><parameter name="summaryType">daily</parameter></invoke></function_calls>
 
 错误格式（不要使用）：
 \`\`\`
-read_diary_entries: {"startDate": "2026-04-19"}
+get_diary_entries: {"startDate": "2026-04-19"}
 \`\`\`
 
 ## 注意事项
@@ -512,13 +515,26 @@ export async function loadAgentConfig(app: any, agentId: string = 'diary'): Prom
 	const agentDir = getAgentDir(agentId);
 
 	const readFile = async (filename: string, fallback: string): Promise<string> => {
+		const path = `${agentDir}/${filename}`;
+
+		// Try using vault adapter for hidden directories first
+		if (app.vault.adapter && typeof app.vault.adapter.read === 'function') {
+			try {
+				const content = await app.vault.adapter.read(path);
+				return content;
+			} catch (error) {
+				// Fall through to Obsidian's file lookup.
+			}
+		}
+
+		// Fallback to getAbstractFileByPath
 		try {
-			const path = `${agentDir}/${filename}`;
 			const file = app.vault.getAbstractFileByPath(path);
 
 			// Check if file exists - TFile has a 'stat' property
 			if (file && (file as any).stat) {
-				return await app.vault.read(file);
+				const content = await app.vault.read(file);
+				return content;
 			}
 		} catch (error) {
 			// File doesn't exist or error reading, use fallback

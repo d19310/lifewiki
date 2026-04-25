@@ -1,577 +1,318 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
-# LifeWiki 安装脚本 v1.4
-# 交互式安装 LifeWiki 插件和创建 vault
+# LifeWiki v2.0 installer
+# Creates or updates an Obsidian vault and installs the LifeWiki plugin.
 #
 
-set -e
+set -euo pipefail
 
-# 颜色定义
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
-# 默认配置
-PLUGIN_NAME="lifewiki"
-DEFAULT_VAULT_NAME="LifeWikiVault"
+PLUGIN_ID="lifewiki"
+PLUGIN_NAME="LifeWiki"
+VERSION="v2.0"
+GITHUB_REPO="d19310/lifewiki"
+DEFAULT_VAULT_NAME="LifeWiki"
+VAULT_PARENT_DIR="$HOME/Documents"
+VAULT_NAME="$DEFAULT_VAULT_NAME"
+VAULT_PATH=""
+USE_LOCAL=false
+OPEN_AFTER_INSTALL=true
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-# 安装选项
-USE_LOCAL=false
-USE_BRAT=false
-GITHUB_REPO="d19310/lifewiki"
-VAULT_PARENT_DIR="$HOME"
-VAULT_NAME="$DEFAULT_VAULT_NAME"
+log_info() { echo -e "${GREEN}[INFO]${NC} $1"; }
+log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
+log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
+log_step() { echo -e "${BLUE}==>${NC} $1"; }
 
 usage() {
-    echo "用法: $0 [选项]"
-    echo ""
-    echo "选项:"
-    echo "  -n, --name <名称>       Vault 名称 (默认: ${DEFAULT_VAULT_NAME})"
-    echo "  -p, --parent <路径>     Vault 父目录 (默认: ${HOME})"
-    echo "  -b, --brat              使用 BRAT 从 GitHub 安装"
-    echo "  -r, --repo <repo>       GitHub 仓库地址 (默认: d19310/lifewiki)"
-    echo "  -l, --local             使用本地已构建的文件（跳过下载）"
-    echo "  -h, --help              显示帮助"
-    echo ""
-    echo "说明:"
-    echo "  默认从 GitHub 下载预构建的插件文件"
-    echo "  -l 模式使用本地已存在的 main.js"
-    echo ""
-    echo "示例:"
-    echo "  $0                                    # 从 GitHub 下载安装"
-    echo "  $0 -n \"MyVault\" -p \"~/Documents\"     # 自定义 vault"
-    echo "  $0 -l                                 # 使用本地构建文件"
-    echo "  $0 -b                                 # 使用 BRAT 从 GitHub 安装"
-    exit 1
+	cat <<EOF
+LifeWiki v2.0 安装脚本
+
+用法:
+  ./install.sh [选项]
+
+选项:
+  -n, --name <名称>       Vault 名称，默认: ${DEFAULT_VAULT_NAME}
+  -p, --parent <路径>     Vault 父目录，默认: ${VAULT_PARENT_DIR}
+  -v, --vault <路径>      直接指定 Vault 完整路径
+  -r, --repo <repo>       GitHub 仓库，默认: ${GITHUB_REPO}
+  -t, --tag <tag>         Release tag，默认: ${VERSION}
+  -l, --local             使用当前目录本地构建产物安装
+  --no-open               安装完成后不自动打开 Obsidian
+  -h, --help              显示帮助
+
+示例:
+  ./install.sh
+  ./install.sh -n "MyLifeWiki"
+  ./install.sh -v "\$HOME/Obsidian/LifeWiki"
+  ./install.sh -l -v "\$HOME/test-lifewiki-vault"
+
+说明:
+  默认从 GitHub Release 下载 main.js、manifest.json、styles.css。
+  插件安装目录为 .obsidian/plugins/${PLUGIN_ID}。
+EOF
 }
 
-log_info() {
-    echo -e "${GREEN}[INFO]${NC} $1"
+expand_path() {
+	local input="$1"
+	input="${input/#\~/$HOME}"
+	if [[ "$input" != /* ]]; then
+		input="$(pwd)/$input"
+	fi
+	local dir
+	dir="$(dirname "$input")"
+	mkdir -p "$dir"
+	echo "$(cd "$dir" && pwd)/$(basename "$input")"
 }
 
-log_warn() {
-    echo -e "${YELLOW}[WARN]${NC} $1"
-}
-
-log_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
-}
-
-log_step() {
-    echo -e "${BLUE}==>${NC} $1"
-}
-
-# 解析命令行参数
 while [[ $# -gt 0 ]]; do
-    case $1 in
-        -n|--name)
-            VAULT_NAME="$2"
-            shift 2
-            ;;
-        -p|--parent)
-            VAULT_PARENT_DIR="$2"
-            shift 2
-            ;;
-        -l|--local)
-            USE_LOCAL=true
-            shift
-            ;;
-        -b|--brat)
-            USE_BRAT=true
-            shift
-            ;;
-        -r|--repo)
-            GITHUB_REPO="$2"
-            shift 2
-            ;;
-        -h|--help)
-            usage
-            ;;
-        *)
-            log_error "未知参数: $1"
-            usage
-            ;;
-    esac
+	case "$1" in
+		-n|--name)
+			VAULT_NAME="$2"
+			shift 2
+			;;
+		-p|--parent)
+			VAULT_PARENT_DIR="${2/#\~/$HOME}"
+			shift 2
+			;;
+		-v|--vault)
+			VAULT_PATH="$(expand_path "$2")"
+			shift 2
+			;;
+		-r|--repo)
+			GITHUB_REPO="$2"
+			shift 2
+			;;
+		-t|--tag)
+			VERSION="$2"
+			shift 2
+			;;
+		-l|--local)
+			USE_LOCAL=true
+			shift
+			;;
+		--no-open)
+			OPEN_AFTER_INSTALL=false
+			shift
+			;;
+		-h|--help)
+			usage
+			exit 0
+			;;
+		*)
+			log_error "未知参数: $1"
+			usage
+			exit 1
+			;;
+	esac
 done
 
-# 计算完整 vault 路径
-VAULT_PATH="${VAULT_PARENT_DIR}/${VAULT_NAME}"
-VAULT_PATH="$(cd "$(dirname "$VAULT_PATH")" && pwd)/$(basename "$VAULT_PATH")"
+if [[ -z "$VAULT_PATH" ]]; then
+	VAULT_PATH="$(expand_path "${VAULT_PARENT_DIR}/${VAULT_NAME}")"
+fi
 
-# 检查系统
+PLUGIN_DIR="${VAULT_PATH}/.obsidian/plugins/${PLUGIN_ID}"
+
 check_system() {
-    log_step "检查系统环境..."
+	log_step "检查环境"
 
-    if [[ "$OSTYPE" != "darwin"* ]]; then
-        log_error "此脚本仅支持 macOS"
-        exit 1
-    fi
+	if ! command -v curl >/dev/null 2>&1; then
+		log_error "未找到 curl，无法下载安装文件"
+		exit 1
+	fi
 
-    if [ ! -d "/Applications/Obsidian.app" ]; then
-        log_error "未找到 Obsidian。请先安装 Obsidian: https://obsidian.md"
-        exit 1
-    fi
+	if [[ "$OSTYPE" == "darwin"* ]] && [[ ! -d "/Applications/Obsidian.app" ]]; then
+		log_warn "未在 /Applications 找到 Obsidian。安装仍会继续，你可以之后手动打开 vault。"
+	fi
 
-    log_info "系统检查通过 ✓"
-    echo ""
+	log_info "环境检查完成"
 }
 
-# 检查 Obsidian 版本
-check_obsidian() {
-    log_step "检查 Obsidian 版本..."
-
-    local MIN_VERSION="1.5.0"
-    local obsidian_version=$(defaults read "/Applications/Obsidian.app/Contents/Info.plist" CFBundleShortVersionString 2>/dev/null || echo "")
-
-    if [ -z "$obsidian_version" ]; then
-        log_warn "无法获取 Obsidian 版本，假设版本符合要求"
-        return 0
-    fi
-
-    log_info "当前版本: ${obsidian_version}"
-
-    if [ "$(printf '%s\n%s\n' "$MIN_VERSION" "$obsidian_version" | sort -V | head -n1)" != "$MIN_VERSION" ]; then
-        echo ""
-        echo "LifeWiki 需要 Obsidian ${MIN_VERSION} 或更高版本。"
-        echo "你当前版本: ${obsidian_version}"
-        echo ""
-        read -p "是否通过 Homebrew 升级 Obsidian? (y/n) " -n 1 -r
-        echo
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            log_info "跳过 Obsidian 升级"
-        else
-            if ! command -v brew &> /dev/null; then
-                log_info "安装 Homebrew..."
-                /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-                eval "$(brew shellenv)"
-            fi
-            log_info "升级 Obsidian..."
-            brew upgrade --cask obsidian
-            local new_version=$(defaults read "/Applications/Obsidian.app/Contents/Info.plist" CFBundleShortVersionString 2>/dev/null || echo "")
-            [ -n "$new_version" ] && log_info "新版本: ${new_version}"
-        fi
-    else
-        log_info "Obsidian 版本符合要求 ✓"
-    fi
-    echo ""
+confirm_install() {
+	echo ""
+	echo "========================================"
+	echo "       LifeWiki v2.0 安装确认"
+	echo "========================================"
+	echo ""
+	echo "Vault: ${VAULT_PATH}"
+	echo "插件目录: ${PLUGIN_DIR}"
+	echo "安装来源: $([[ "$USE_LOCAL" == true ]] && echo "本地构建产物" || echo "GitHub Release ${GITHUB_REPO}@${VERSION}")"
+	echo ""
+	read -r -p "确认开始安装? (y/n) " reply
+	if [[ ! "$reply" =~ ^[Yy]$ ]]; then
+		log_info "安装取消"
+		exit 0
+	fi
 }
 
-# 检查依赖
-check_dependencies() {
-    log_step "检查依赖环境..."
+create_vault_structure() {
+	log_step "准备 Vault 目录结构"
 
-    # 检查 gh CLI (用于从 GitHub 下载插件)
-    if command -v gh &> /dev/null; then
-        log_info "gh CLI: 已安装 ✓"
-    else
-        log_warn "gh CLI: 未找到 (下载插件需要)"
-    fi
+	mkdir -p "$VAULT_PATH"
+	mkdir -p "$PLUGIN_DIR"
+	mkdir -p "${VAULT_PATH}/.obsidian"
 
-    # 检查 git
-    if command -v git &> /dev/null; then
-        log_info "git: $(git --version | cut -d' ' -f1-3) ✓"
-    else
-        log_warn "git: 未找到"
-    fi
+	mkdir -p "${VAULT_PATH}/Daily"
+	mkdir -p "${VAULT_PATH}/People"
+	mkdir -p "${VAULT_PATH}/Projects"
+	mkdir -p "${VAULT_PATH}/Things"
+	mkdir -p "${VAULT_PATH}/Ideas"
+	mkdir -p "${VAULT_PATH}/Knowledge"
+	mkdir -p "${VAULT_PATH}/Memory/Capsules"
+	mkdir -p "${VAULT_PATH}/Memory/Patterns"
+	mkdir -p "${VAULT_PATH}/Memory/OpenLoops"
 
-    echo ""
-}
+	mkdir -p "${VAULT_PATH}/.lifewiki/index"
+	mkdir -p "${VAULT_PATH}/.lifewiki/sessions"
+	mkdir -p "${VAULT_PATH}/.lifewiki/agents"
+	mkdir -p "${VAULT_PATH}/.lifewiki/skills"
+	mkdir -p "${VAULT_PATH}/.lifewiki/templates"
 
-# 交互式配置 vault
-interactive_config() {
-    echo ""
-    echo "========================================"
-    echo "       配置 Vault"
-    echo "========================================"
-    echo ""
-    echo "Vault 用来存储你的日记和笔记。"
-    echo ""
-    echo "当前设置:"
-    echo "  名称: ${VAULT_NAME}"
-    echo "  位置: ${VAULT_PARENT_DIR}"
-    echo "  完整路径: ${VAULT_PATH}"
-    echo ""
-    read -p "是否使用这些设置? (y/n) " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        echo ""
-        echo "请输入新的 vault 名称 (直接回车保持默认):"
-        read -p "[${DEFAULT_VAULT_NAME}] " -r VAULT_NAME_INPUT
-        if [ -n "$VAULT_NAME_INPUT" ]; then
-            VAULT_NAME="$VAULT_NAME_INPUT"
-        fi
-
-        echo ""
-        echo "请输入 vault 父目录路径 (直接回车保持默认):"
-        read -p "[${HOME}] " -r VAULT_PARENT_INPUT
-        if [ -n "$VAULT_PARENT_INPUT" ]; then
-            VAULT_PARENT_DIR="${VAULT_PARENT_INPUT/#\~/$HOME}"
-        fi
-
-        VAULT_PATH="${VAULT_PARENT_DIR}/${VAULT_NAME}"
-        VAULT_PATH="$(cd "$(dirname "$VAULT_PATH")" && pwd)/$(basename "$VAULT_PATH")"
-
-        echo ""
-        log_info "新的 Vault 路径: ${VAULT_PATH}"
-    fi
-    echo ""
-}
-
-# 创建 vault
-create_vault() {
-    log_step "准备创建 Vault..."
-
-    if [ -d "$VAULT_PATH" ]; then
-        log_warn "Vault 已存在: ${VAULT_PATH}"
-        echo ""
-        read -p "是否继续安装插件到现有 vault? (y/n) " -n 1 -r
-        echo
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            log_info "安装取消"
-            exit 0
-        fi
-        log_info "将插件安装到现有 vault"
-    else
-        echo ""
-        read -p "确认创建新 Vault: ${VAULT_PATH} ? (y/n) " -n 1 -r
-        echo
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            log_info "安装取消"
-            exit 0
-        fi
-
-        log_info "创建 Vault..."
-        mkdir -p "$VAULT_PATH"
-        log_info "Vault 创建成功 ✓"
-    fi
-
-    # 创建目录结构
-    mkdir -p "${VAULT_PATH}/Daily"
-    mkdir -p "${VAULT_PATH}/People"
-    mkdir -p "${VAULT_PATH}/Projects"
-    mkdir -p "${VAULT_PATH}/Things"
-    mkdir -p "${VAULT_PATH}/Ideas"
-    mkdir -p "${VAULT_PATH}/Knowledge"
-    mkdir -p "${VAULT_PATH}/.lifewiki/agents"
-    mkdir -p "${VAULT_PATH}/.lifewiki/sessions"
-    mkdir -p "${VAULT_PATH}/.lifewiki/templates"
-    mkdir -p "${VAULT_PATH}/.lifewiki/skills"
-    mkdir -p "${VAULT_PATH}/.obsidian"
-
-    log_info "目录结构创建完成 ✓"
-
-    # 创建今日日记
-    TODAY=$(date +%Y-%m-%d)
-    if [ ! -f "${VAULT_PATH}/Daily/${TODAY}.md" ]; then
-        cat > "${VAULT_PATH}/Daily/${TODAY}.md" << 'EOF'
+	local today
+	today="$(date +%Y-%m-%d)"
+	if [[ ! -f "${VAULT_PATH}/Daily/${today}.md" ]]; then
+		cat > "${VAULT_PATH}/Daily/${today}.md" <<EOF
 ---
-uid: {{DATE:YYYYMMDDHHmmss}}
-tags: []
+date: ${today}
+tags:
+  - lifewiki/daily
 ---
 
-# {{DATE:YYYY-MM-DD}}
+# ${today}
 
 ## 日记
 
 EOF
-        log_info "创建今日日记: Daily/${TODAY}.md ✓"
-    fi
+	fi
 
-    echo ""
+	log_info "Vault 目录结构已准备"
 }
 
-# 复制配置文件（本地模式）
-copy_configs_local() {
-    log_step "复制配置文件..."
-
-    # Agent 配置
-    if [ -d "${SCRIPT_DIR}/src/.lifewiki/agents" ]; then
-        cp -r "${SCRIPT_DIR}/src/.lifewiki/agents/" "${VAULT_PATH}/.lifewiki/" 2>/dev/null || true
-        log_info "Agent 配置 ✓"
-    fi
-
-    # Skill 配置
-    if [ -d "${SCRIPT_DIR}/.lifewiki/skills" ]; then
-        cp -r "${SCRIPT_DIR}/.lifewiki/skills/" "${VAULT_PATH}/.lifewiki/" 2>/dev/null || true
-        log_info "Skill 配置 ✓"
-    fi
-
-    # 模板
-    if [ -d "${SCRIPT_DIR}/src/.lifewiki/templates" ]; then
-        cp "${SCRIPT_DIR}/src/.lifewiki/templates/"*.md "${VAULT_PATH}/.lifewiki/templates/" 2>/dev/null || true
-        log_info "模板文件 ✓"
-    fi
-
-    echo ""
+copy_local_defaults() {
+	if [[ -d "${SCRIPT_DIR}/.lifewiki" ]]; then
+		cp -R "${SCRIPT_DIR}/.lifewiki/." "${VAULT_PATH}/.lifewiki/"
+		log_info "已复制默认 Agent/Skill 配置"
+	fi
 }
 
-# 下载配置文件
-download_configs() {
-    log_step "下载配置文件..."
+download_release_source_defaults() {
+	local tmp_dir archive source_dir
+	tmp_dir="$(mktemp -d)"
+	archive="${tmp_dir}/source.tar.gz"
 
-    mkdir -p "${VAULT_PATH}/.lifewiki/agents"
-    mkdir -p "${VAULT_PATH}/.lifewiki/skills"
-    mkdir -p "${VAULT_PATH}/.lifewiki/templates"
+	if curl -fsSL "https://codeload.github.com/${GITHUB_REPO}/tar.gz/refs/tags/${VERSION}" -o "$archive"; then
+		tar -xzf "$archive" -C "$tmp_dir"
+		source_dir="$(find "$tmp_dir" -maxdepth 1 -type d -name '*-*' | head -n 1)"
+		if [[ -n "$source_dir" && -d "${source_dir}/.lifewiki" ]]; then
+			cp -R "${source_dir}/.lifewiki/." "${VAULT_PATH}/.lifewiki/"
+			log_info "已安装默认 Agent/Skill 配置"
+		else
+			log_warn "Release 源码中未找到 .lifewiki 默认配置，已保留空目录"
+		fi
+	else
+		log_warn "默认配置下载失败，插件仍可安装；首次使用时会创建必要数据"
+	fi
 
-    # 下载 agents 目录
-    log_info "下载 Agent 配置..."
-    for file in "chat/IDENTITY.md" "chat/SKILL.md" "chat/SOUL.md" "chat/WIKI.md" "diary/IDENTITY.md" "diary/SKILL.md" "diary/SOUL.md" "diary/WIKI.md"; do
-        local path=".lifewiki/agents/${file}"
-        local dir=$(dirname "${VAULT_PATH}/.lifewiki/agents/${file}")
-        mkdir -p "$dir"
-        if gh api repos/${GITHUB_REPO}/contents/${path} --jq '.content' 2>/dev/null | base64 -d > "${VAULT_PATH}/.lifewiki/agents/${file}"; then
-            : # 成功
-        fi
-    done
-    log_info "Agent 配置 ✓"
-
-    # 下载 skills 目录
-    log_info "下载 Skill 配置..."
-    local skills_list=$(gh api repos/${GITHUB_REPO}/contents/.lifewiki/skills --jq '.[].path' 2>/dev/null)
-    for path in $skills_list; do
-        if [[ "$path" == *.md || "$path" == *executor.ts || "$path" == *rules-prompt.ts ]]; then
-            local file="${path##.lifewiki/skills/}"
-            local dir=$(dirname "${VAULT_PATH}/.lifewiki/skills/${file}")
-            mkdir -p "$dir"
-            if gh api repos/${GITHUB_REPO}/contents/${path} --jq '.content' 2>/dev/null | base64 -d > "${VAULT_PATH}/.lifewiki/skills/${file}"; then
-                : # 成功
-            fi
-        fi
-    done
-    log_info "Skill 配置 ✓"
-
-    # 下载 templates
-    log_info "下载模板文件..."
-    local templates_list=$(gh api repos/${GITHUB_REPO}/contents/src/.lifewiki/templates --jq '.[].path' 2>/dev/null)
-    for path in $templates_list; do
-        local file="${path##src/.lifewiki/templates/}"
-        if gh api repos/${GITHUB_REPO}/contents/${path} --jq '.content' 2>/dev/null | base64 -d > "${VAULT_PATH}/.lifewiki/templates/${file}"; then
-            : # 成功
-        fi
-    done
-    log_info "模板文件 ✓"
-
-    echo ""
+	rm -rf "$tmp_dir"
 }
 
-# 下载插件文件
-download_plugin() {
-    log_info "从 GitHub 下载插件..."
+install_plugin_local() {
+	log_step "安装本地插件文件"
 
-    # 检查 gh CLI
-    if ! command -v gh &> /dev/null; then
-        echo ""
-        echo "需要 gh CLI 来下载插件文件。"
-        echo ""
-        read -p "是否通过 Homebrew 安装 gh? (y/n) " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
-            if ! command -v brew &> /dev/null; then
-                log_info "安装 Homebrew..."
-                /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-                eval "$(brew shellenv)"
-            fi
-            log_info "安装 gh..."
-            brew install gh
-        else
-            log_error "需要 gh CLI。请访问 https://cli.github.com 安装"
-            return 1
-        fi
-    fi
+	[[ -f "${SCRIPT_DIR}/main.js" ]] || { log_error "缺少 ${SCRIPT_DIR}/main.js，请先运行 npm run build"; exit 1; }
+	[[ -f "${SCRIPT_DIR}/manifest.json" ]] || { log_error "缺少 manifest.json"; exit 1; }
 
-    log_info "使用 gh CLI 下载..."
-    if ! gh api repos/${GITHUB_REPO}/contents/main.js --jq '.content' | base64 -d > "${PLUGIN_DIR}/main.js" 2>/dev/null; then
-        log_error "main.js 下载失败"
-        return 1
-    fi
+	cp "${SCRIPT_DIR}/main.js" "${PLUGIN_DIR}/main.js"
+	cp "${SCRIPT_DIR}/manifest.json" "${PLUGIN_DIR}/manifest.json"
 
-    if gh api repos/${GITHUB_REPO}/contents/main.css --jq '.content' 2>/dev/null | base64 -d > "${PLUGIN_DIR}/main.css"; then
-        log_info "main.css 下载完成"
-    fi
+	if [[ -f "${SCRIPT_DIR}/styles.css" ]]; then
+		cp "${SCRIPT_DIR}/styles.css" "${PLUGIN_DIR}/styles.css"
+	elif [[ -f "${SCRIPT_DIR}/main.css" ]]; then
+		cp "${SCRIPT_DIR}/main.css" "${PLUGIN_DIR}/styles.css"
+	fi
 
-    if ! gh api repos/${GITHUB_REPO}/contents/manifest.json --jq '.content' | base64 -d > "${PLUGIN_DIR}/manifest.json" 2>/dev/null; then
-        log_error "manifest.json 下载失败"
-        return 1
-    fi
-
-    return 0
+	copy_local_defaults
 }
 
-# 安装插件
-install_plugin() {
-    log_step "安装 LifeWiki 插件..."
-
-    PLUGIN_DIR="${VAULT_PATH}/.obsidian/plugins/${PLUGIN_NAME}"
-    mkdir -p "$PLUGIN_DIR"
-
-    if [ "$USE_LOCAL" = true ]; then
-        log_info "使用本地构建文件..."
-        cp "${SCRIPT_DIR}/main.js" "$PLUGIN_DIR/" || { log_error "main.js 复制失败"; exit 1; }
-        cp "${SCRIPT_DIR}/main.css" "$PLUGIN_DIR/" 2>/dev/null || true
-        cp "${SCRIPT_DIR}/manifest.json" "$PLUGIN_DIR/" || { log_error "manifest.json 复制失败"; exit 1; }
-    else
-        # 从 GitHub 下载
-        if ! download_plugin; then
-            log_warn "下载失败，尝试使用本地文件..."
-            if [ -f "${SCRIPT_DIR}/main.js" ]; then
-                cp "${SCRIPT_DIR}/main.js" "$PLUGIN_DIR/"
-                cp "${SCRIPT_DIR}/main.css" "$PLUGIN_DIR/" 2>/dev/null || true
-                cp "${SCRIPT_DIR}/manifest.json" "$PLUGIN_DIR/"
-            else
-                log_error "无法获取插件文件"
-                exit 1
-            fi
-        fi
-    fi
-
-    if [ -f "$PLUGIN_DIR/main.js" ] && [ -f "$PLUGIN_DIR/manifest.json" ]; then
-        log_info "插件安装完成 ✓"
-    else
-        log_error "插件文件缺失"
-        exit 1
-    fi
-
-    echo ""
+download_asset() {
+	local asset="$1"
+	local target="$2"
+	local url="https://github.com/${GITHUB_REPO}/releases/download/${VERSION}/${asset}"
+	curl -fsSL "$url" -o "$target"
 }
 
-# BRAT 安装模式
-install_brat() {
-    log_step "BRAT 安装模式..."
+install_plugin_from_release() {
+	log_step "从 GitHub Release 安装插件"
 
-    # 检查 vault
-    if [ ! -d "$VAULT_PATH" ]; then
-        log_info "创建 Vault: ${VAULT_PATH}"
-        mkdir -p "$VAULT_PATH"
-        mkdir -p "${VAULT_PATH}/Daily"
-        mkdir -p "${VAULT_PATH}/.obsidian"
-        mkdir -p "${VAULT_PATH}/.lifewiki/agents"
-        mkdir -p "${VAULT_PATH}/.lifewiki/sessions"
-        mkdir -p "${VAULT_PATH}/.lifewiki/templates"
-        mkdir -p "${VAULT_PATH}/.lifewiki/skills"
-    fi
-    mkdir -p "${VAULT_PATH}/.obsidian/plugins"
+	download_asset "main.js" "${PLUGIN_DIR}/main.js" || { log_error "main.js 下载失败"; exit 1; }
+	download_asset "manifest.json" "${PLUGIN_DIR}/manifest.json" || { log_error "manifest.json 下载失败"; exit 1; }
 
-    local brat_path="${VAULT_PATH}/.obsidian/plugins/obsidian42-brat"
-    if [ ! -d "$brat_path" ]; then
-        echo ""
-        echo "请在 Obsidian 中手动安装 BRAT 插件："
-        echo "  设置 → 社区插件 → 浏览 → 搜索 'BRAT' → 安装"
-        echo ""
-        echo "安装完成后重新运行: $0 -b -n \"${VAULT_NAME}\" -p \"${VAULT_PARENT_DIR}\""
-        echo ""
-        read -p "是否现在打开 Obsidian? (y/n) " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
-            open "$VAULT_PATH" -a Obsidian
-        fi
-        exit 0
-    fi
+	if ! download_asset "styles.css" "${PLUGIN_DIR}/styles.css"; then
+		log_warn "styles.css 下载失败，继续安装无样式版本"
+	fi
 
-    echo ""
-    echo "========================================"
-    echo "       BRAT 安装步骤"
-    echo "========================================"
-    echo ""
-    echo "1. 在 Obsidian 中打开: ${VAULT_PATH}"
-    echo "2. 设置 → 社区插件 → BRAT → 打开设置"
-    echo "3. 点击 'Add a beta plugin from a GitHub repository'"
-    echo "4. 输入仓库地址: ${GITHUB_REPO}"
-    echo "5. 点击 'Add Plugin'"
-    echo "6. 返回社区插件列表，启用 LifeWiki"
-    echo ""
-    read -p "是否现在打开 Obsidian? (y/n) " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        open "$VAULT_PATH" -a Obsidian
-    fi
+	download_release_source_defaults
 }
 
-# 最终确认并执行
-final_summary() {
-    echo ""
-    echo "========================================"
-    echo "       安装确认"
-    echo "========================================"
-    echo ""
-    echo "Vault 路径: ${VAULT_PATH}"
-    echo "插件目录: ${VAULT_PATH}/.obsidian/plugins/${PLUGIN_NAME}"
-    [ "$USE_LOCAL" = true ] && echo "模式: 本地文件" || echo "模式: 从 GitHub 下载"
-    [ "$USE_BRAT" = true ] && echo "安装方式: BRAT (从 GitHub)"
-    echo ""
-    read -p "确认开始安装? (y/n) " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        log_info "安装取消"
-        exit 0
-    fi
+enable_plugin_if_safe() {
+	local plugins_file="${VAULT_PATH}/.obsidian/community-plugins.json"
+
+	if [[ ! -f "$plugins_file" ]]; then
+		printf '[\n  "%s"\n]\n' "$PLUGIN_ID" > "$plugins_file"
+		log_info "已在新 vault 中预启用 LifeWiki"
+		return
+	fi
+
+	if grep -q "\"${PLUGIN_ID}\"" "$plugins_file"; then
+		log_info "LifeWiki 已在社区插件列表中"
+	else
+		log_warn "检测到已有社区插件配置。为避免破坏配置，请在 Obsidian 中手动启用 LifeWiki。"
+	fi
 }
 
-# 完成
 show_completion() {
-    echo ""
-    echo "========================================"
-    log_info "安装完成!"
-    echo "========================================"
-    echo ""
-    echo "Vault: ${VAULT_PATH}"
-    echo ""
-    echo "下一步:"
-    echo "1. 在 Obsidian 中打开 vault (如果未自动打开)"
-    echo "2. 设置 → 社区插件 → 启用 LifeWiki"
-    echo ""
-    echo "常用命令:"
-    echo "  open \"${VAULT_PATH}\" -a Obsidian"
-    echo ""
+	echo ""
+	echo "========================================"
+	log_info "LifeWiki v2.0 安装完成"
+	echo "========================================"
+	echo ""
+	echo "Vault: ${VAULT_PATH}"
+	echo "插件: ${PLUGIN_DIR}"
+	echo ""
+	echo "下一步:"
+	echo "1. 打开 Obsidian vault"
+	echo "2. 如未自动启用：设置 → 社区插件 → LifeWiki → 启用"
+	echo "3. 打开 LifeWiki 设置，为 Diary Agent 和 Chat Agent 配置 AI Provider"
+	echo ""
 }
 
-# 主流程
 main() {
-    echo ""
-    echo "========================================"
-    echo "       LifeWiki 安装向导"
-    echo "========================================"
-    echo ""
+	echo ""
+	echo "========================================"
+	echo "       LifeWiki v2.0 安装向导"
+	echo "========================================"
 
-    # BRAT 模式
-    if [ "$USE_BRAT" = true ]; then
-        interactive_config
-        check_system
-        final_summary
-        install_brat
-        show_completion
-        exit 0
-    fi
+	check_system
+	confirm_install
+	create_vault_structure
 
-    # 常规模式
-    check_system
-    check_obsidian
-    check_dependencies
-    interactive_config
-    final_summary
+	if [[ "$USE_LOCAL" == true ]]; then
+		install_plugin_local
+	else
+		install_plugin_from_release
+	fi
 
-    create_vault
-    if [ "$USE_LOCAL" = true ]; then
-        copy_configs_local
-    else
-        download_configs
-    fi
-    install_plugin
+	enable_plugin_if_safe
+	show_completion
 
-    echo ""
-    log_info "插件已安装到 vault"
-    log_warn "请在 Obsidian 中启用: 设置 → 社区插件 → 启用 LifeWiki"
-    echo ""
-
-    read -p "是否现在打开 Obsidian? (y/n) " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        open "$VAULT_PATH" -a Obsidian
-    fi
-
-    show_completion
+	if [[ "$OPEN_AFTER_INSTALL" == true && "$OSTYPE" == "darwin"* ]]; then
+		open "$VAULT_PATH" -a Obsidian >/dev/null 2>&1 || true
+	fi
 }
 
 main "$@"

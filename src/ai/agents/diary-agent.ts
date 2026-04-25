@@ -25,30 +25,29 @@ export class DiaryAgent implements Agent {
 	}
 
 	/**
-	 * Initialize the agent - creates the underlying LangGraphAgent
+	 * Initialize the agent lazily.
+	 *
+	 * LifeWiki 2.0 single-block capture analysis does not need AgentConfig, so
+	 * this creates the LangGraphAgent wrapper without loading .lifewiki/agents.
 	 */
 	async initialize(): Promise<void> {
 		if (this.initialized) {
 			return;
 		}
 
-		// Get provider from AgentRegistry based on agent-provider mapping
 		const provider = this.agentRegistry.getAgentProvider(this.id);
 		if (!provider) {
 			throw new Error(`No provider found for agent ${this.id}`);
 		}
 
-		// Import dynamically to avoid circular dependencies
 		const { createLangGraphAgent } = await import('../langgraph/agent');
-
 		this.langGraphAgent = createLangGraphAgent(
 			provider,
 			this.entityManager,
 			this.app,
-			this.id  // agentId for loading agent-specific config
+			this.id
 		);
 
-		await this.langGraphAgent.initialize();
 		this.initialized = true;
 	}
 
@@ -70,6 +69,7 @@ export class DiaryAgent implements Agent {
 		return {
 			response: result.initialResponse || '',
 			session: result.session,
+			areas: result.areas,
 			error: result.error
 		};
 	}
@@ -80,6 +80,10 @@ export class DiaryAgent implements Agent {
 	async continue(ctx: AgentContext, message: string): Promise<AgentResult> {
 		if (!this.langGraphAgent) {
 			await this.initialize();
+		}
+
+		if (!this.langGraphAgent?.isConfigLoaded?.()) {
+			await this.langGraphAgent.initialize();
 		}
 
 		const result = await this.langGraphAgent.continueAnalysis(ctx.blockId, message);

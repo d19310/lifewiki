@@ -1,156 +1,128 @@
 # LifeWiki
 
-**日记是 AI 时代人生最大的复利！**
+LifeWiki v2.0 是一个 Obsidian 个人记忆插件。它让用户继续用低摩擦的日记 block 记录生活和工作，同时用 AI 把日记里的实体、关系、事实、互动记录和可复用隐形知识沉淀为 Obsidian vault 中的人类可读档案，也沉淀为 Agent 可读的个人记忆索引。
 
-LifeWiki 是一个 Obsidian 插件，将你的日记从简单的文字记录升级为 AI 驱动的个人知识管理和人生复利系统。
+v2.0 的产品重点不是“让用户整理日记”，而是让日记逐渐变成一个能被自己和 AI Agent 使用的个人记忆层。
 
-## 核心功能
+## 核心能力
 
-### 1. AI 日记分析
-- 自动分析日记内容，提取人物、项目、想法、事物等实体
-- 智能标签归类，构建你的个人知识图谱
-- 支持多 AI 提供者：Claude、DashScope、Ollama 等
+- **日记 Block 编辑器**：按天记录，可追加子 block，适合流水账式工作日志和生活日记。
+- **AI 分析模式**：对每条日记生成确认卡片，辅助用户归档实体、事实、背景信息、互动记录和关系。
+- **实体档案**：自动维护 `People/`、`Projects/`、`Things/`、`Ideas/`、`Knowledge/` 下的 Markdown 档案。
+- **双链关系**：在互动记录和实体档案中使用 Obsidian `[[双链]]` 连接人、项目、知识和物品。
+- **今日洞察**：只聚焦当天真正值得跟进的开放事项和高价值信号，减少噪音。
+- **聊天模式**：通过自然语言让 AI 查询 vault、总结日记、发现关系、创建或更新档案。
+- **多 Provider 支持**：支持 OpenAI-compatible 自定义服务商，包括 MiniMax、DeepSeek、OpenAI 兼容网关等。
+- **思考模式配置**：Provider 可配置 `thinking` 和 `reasoning_effort`，默认关闭。
 
-### 2. Web 剪藏
-- 一键剪藏网页内容为 Markdown
-- 智能识别微信文章并提取正文
-- 自动归类到对应文件夹
+## Vault 结构
 
-### 3. AI 对话助手
-- 在 Obsidian 内直接与 AI 对话
-- 基于你的日记和笔记上下文
-- 辅助写作、总结、思考
+LifeWiki v2.0 默认使用以下目录：
 
-### 4. 实体管理
-- 自动追踪日记中的人物、项目、想法
-- 展示实体之间的关系
-- 发现知识盲区
-
-## 系统要求
-
-- macOS
-- Obsidian 1.5.0+
-- Node.js（用于构建）
+```text
+Vault/
+├── Daily/                    # 日记
+├── People/                   # 人、人脉、组织联系人
+├── Projects/                 # 项目和任务
+├── Things/                   # 物品、产品、工具、方案
+├── Ideas/                    # 想法、原则、观点、概念
+├── Knowledge/                # 文章、文档、资料、知识来源
+├── Memory/
+│   ├── Capsules/             # 记忆胶囊
+│   ├── Patterns/             # 长期模式
+│   └── OpenLoops/            # 待跟进事项
+└── .lifewiki/
+    ├── index/                # Agent 可读索引
+    ├── sessions/             # 日记 block 分析会话
+    ├── agents/               # Agent 提示词配置
+    ├── skills/               # 工具说明
+    └── templates/            # 模板
+```
 
 ## 安装
 
-### 一键安装（推荐）
+### 普通用户安装
 
 ```bash
-git clone https://github.com/d19310/lifewiki.git
-cd lifewiki
-bash install.sh
+curl -fsSL https://raw.githubusercontent.com/d19310/lifewiki/main/install.sh | bash
 ```
 
-安装脚本会自动：
-1. 检查并安装 Homebrew（如需要）
-2. 安装/升级 Obsidian（如需要）
-3. 安装 Node.js（如需要）
-4. 创建 Vault 和目录结构
-5. 安装 LifeWiki 插件
+指定 vault 路径：
 
-### 手动安装
-
-1. 克隆仓库：
-   ```bash
-   git clone https://github.com/d19310/lifewiki.git
-   cd lifewiki
-   ```
-
-2. 安装依赖：
-   ```bash
-   npm install
-   ```
-
-3. 构建插件：
-   ```bash
-   npm run build
-   ```
-
-4. 复制到 Obsidian 插件目录：
-   ```bash
-   cp main.js main.css manifest.json ~/Library/Application\ Support/obsidian/plugins/lifewiki/
-   ```
-
-5. 在 Obsidian 中启用插件：`设置 → 社区插件 → 启用 LifeWiki`
-
-## 使用
-
-1. 打开 Obsidian，选择 LifeWiki Vault
-2. 在左侧边栏找到 LifeWiki 面板
-3. 开始写日记，AI 会自动分析
-4. 使用 AI 助手辅助写作和思考
-
-## 项目结构
-
-```
-lifewiki/
-├── src/
-│   ├── ai/           # AI 相关功能
-│   ├── entities/     # 实体提取
-│   ├── views/        # Obsidian 视图
-│   ├── vault/        # 笔记管理
-│   ├── utils/        # 工具函数
-│   └── .lifewiki/
-│       └── templates/ # 内置模板
-├── install.sh        # 安装脚本
-└── manifest.json     # 插件配置
+```bash
+curl -fsSL https://raw.githubusercontent.com/d19310/lifewiki/main/install.sh | bash -s -- -v "$HOME/Documents/LifeWiki"
 ```
 
-## Vault 目录结构
+安装脚本会：
 
-插件安装后，Vault 目录结构如下：
+1. 创建或复用指定 Obsidian vault。
+2. 初始化 LifeWiki v2.0 目录结构。
+3. 从 GitHub Release 下载插件文件到 `.obsidian/plugins/lifewiki`。
+4. 为新 vault 预启用 LifeWiki 插件。
 
-```
-用户 Vault/
-│
-├── 📁 .obsidian/
-│   └── 📁 plugins/
-│       └── 📁 lifewiki/              # 插件代码
-│
-├── 📁 .lifewiki/                     # LifeWiki 数据目录
-│   ├── 📁 agents/                    # AI Agent 配置
-│   │   └── 📁 chat/                  # 聊天 Agent
-│   │       └── DIARY_REVIEW_SKILL.md  # 日记复盘 Skill
-│   │
-│   ├── 📁 sessions/                 # AI 会话历史
-│   │   └── {blockId}.json
-│   │
-│   └── 📁 templates/                 # 内置模板
-│       ├── journal-template.md       # 日记模板
-│       ├── person-template.md        # 人脉模板
-│       ├── project-template.md        # 项目模板
-│       ├── task-template.md          # 任务模板
-│       ├── thing-template.md         # 物品模板
-│       ├── idea-template.md          # 想法模板
-│       └── knowledge-template.md     # 知识模板
-│
-├── 📁 templates/                     # 用户自定义模板（可选）
-│   └── journal-template.md           # 存在则覆盖内置模板
-│
-├── 📁 Daily/                        # 日记文件
-│   └── 2026-04-19.md
-│
-├── 📁 People/                        # 人脉实体
-├── 📁 Projects/                      # 项目实体
-├── 📁 Things/                        # 物品实体
-├── 📁 Ideas/                         # 想法实体
-└── 📁 Knowledge/                     # 知识实体
+如果 vault 已经有社区插件配置，脚本不会强行改写，请在 Obsidian 中手动启用 LifeWiki。
+
+### 本地开发安装
+
+```bash
+npm install
+npm run build
+cp main.css styles.css
+./install.sh -l -v "$HOME/test-lifewiki-vault"
 ```
 
-**说明：**
-- `.lifewiki/` 目录包含所有 LifeWiki 数据，随 Vault 备份
-- `templates/` 目录可放置同名模板文件覆盖内置版本
-- 插件升级不影响 `.lifewiki/` 中的数据
+## 配置 AI Provider
 
-## 技术栈
+打开 Obsidian 后进入：
 
-- TypeScript
-- Obsidian API
-- LangChain.js
-- Turndown（HTML 转 Markdown）
-- jsdom
+```text
+设置 → 第三方插件 → LifeWiki → 选项
+```
 
-## License
+添加 Provider：
 
-MIT
+- 名称：例如 `DeepSeek V4`
+- 模型：服务商提供的模型名
+- Base URL：OpenAI-compatible 地址，例如 `https://api.deepseek.com/v1`
+- API Key：服务商密钥
+- 思考模式：默认关闭
+- Reasoning Effort：默认不发送，可选 `high` / `max`
+
+然后分别为：
+
+- `Diary Agent`
+- `Chat Agent`
+
+选择对应 Provider。
+
+## 开发
+
+```bash
+npm install
+npm run build
+npm test
+```
+
+发布前建议至少运行：
+
+```bash
+npm run build
+npx jest src/ai/capture-analyzer.test.ts src/memory/legacy-adapter.test.ts src/memory/index-store.test.ts --runInBand
+```
+
+## 发布文件
+
+GitHub Release 需要包含：
+
+- `main.js`
+- `manifest.json`
+- `styles.css`
+
+当前正式插件 ID 是 `lifewiki`，版本为 `2.0.0`。
+
+## 文档
+
+- [PRD](./PRD.md)
+- [LifeWiki 2.0 产品规格](./docs/PRD-2.0.md)
+- [Agent Memory Spec](./docs/AGENT-MEMORY-SPEC.md)
+- [OpenClaw Integration](./docs/OPENCLAW-INTEGRATION.md)

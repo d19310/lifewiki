@@ -6,11 +6,12 @@ import { CalendarView, VIEW_TYPE_CALENDAR } from './views/calendar-view';
 import { EntityManager } from './entities/manager';
 import { createSkillExecutor, SkillExecutor } from './skills';
 import { SessionManager } from './ai/session-manager';
-import { createLangGraphAgent, LangGraphAgent } from './ai/langgraph/agent';
+import type { LangGraphAgent } from './ai/langgraph/agent';
 import type { AIProvider } from './ai/provider';
 import type { AnalysisResult } from './entities/types';
-import { ProviderManager, DefaultAIProvider } from './ai/providers';
-import { AgentRegistry, DiaryAgent, ChatAgent } from './ai/agents';
+import type { BlockMemoryAnalysis } from './memory/types';
+import { DefaultAIProvider, ProviderManager, CustomProvider } from './ai/providers';
+import { AgentRegistry, ChatAgent, DiaryAgent } from './ai/agents';
 
 export default class LifeWikiPlugin extends Plugin {
 	settings!: LifeWikiSettings;
@@ -23,6 +24,7 @@ export default class LifeWikiPlugin extends Plugin {
 	aiAnalysisView?: AIAnalysisPanelView;
 	agentRegistry?: AgentRegistry;
 	calendarView?: CalendarView;
+	private settingsNavStyleEl?: HTMLStyleElement;
 
 	constructor(app: App, manifest: PluginManifest) {
 		super(app, manifest);
@@ -52,63 +54,13 @@ export default class LifeWikiPlugin extends Plugin {
 			this.sessionManager = new SessionManager(this.app);
 			await this.sessionManager.initialize();
 
-			// Initialize LangGraph agent
-			console.log('LifeWiki: Initializing LangGraph agent...');
-			this.langGraphAgent = createLangGraphAgent(
-				this.aiProvider,
-				this.entityManager,
-				this.app
-			);
-			await this.langGraphAgent.initialize();
-			console.log('LifeWiki: LangGraph agent initialized');
-
-			// Initialize Agent Registry — always enabled
-			console.log('LifeWiki: Initializing Agent Registry...');
-			const { ProviderManager, DefaultAIProvider } = await import('./ai/providers');
-			const { AgentRegistry, DiaryAgent, ChatAgent } = await import('./ai/agents');
-			const { CustomProvider } = await import('./ai/providers');
-
-			const providerManager = new ProviderManager();
-
-			// Register configured providers
-			for (const config of this.settings.providers) {
-				const customProvider = new CustomProvider({
-					id: config.id,
-					name: config.name,
-					type: 'custom',
-					endpoint: config.baseUrl,
-					apiKey: config.apiKey,
-					model: config.model,
-				});
-				providerManager.registerProvider(customProvider);
-			}
-
-			// Register default AI provider as fallback
-			providerManager.registerProvider(new DefaultAIProvider(this.aiProvider));
-			providerManager.setDefaultProvider('default');
-
-			// Set up agent-provider mapping from settings
-			const mapping = this.settings.agentProviderMapping;
-			if (mapping.diary) {
-				providerManager.setAgentProvider('diary', mapping.diary);
-			}
-			if (mapping.chat) {
-				providerManager.setAgentProvider('chat', mapping.chat);
-			}
-
-			this.agentRegistry = new AgentRegistry(providerManager);
-
-			// Create agents
+			// Register agents lazily. LifeWiki 2.0 capture analysis should not load
+			// .lifewiki/agents/* config during plugin startup.
+			this.agentRegistry = new AgentRegistry(this.createProviderManager());
 			const diaryAgent = new DiaryAgent(this.agentRegistry, this.entityManager, this.app);
 			const chatAgent = new ChatAgent(this.agentRegistry, this.entityManager, this.app);
-
-			await diaryAgent.initialize();
-			await chatAgent.initialize();
-
 			this.agentRegistry.registerAgent(diaryAgent);
 			this.agentRegistry.registerAgent(chatAgent);
-
-			console.log('LifeWiki: Agent Registry initialized');
 
 			this.registerView(VIEW_TYPE_BLOCK_EDITOR, (leaf) => new BlockEditorView(leaf, this));
 			this.registerView(VIEW_TYPE_AI_ANALYSIS, (leaf) => {
@@ -141,20 +93,14 @@ export default class LifeWikiPlugin extends Plugin {
 			});
 
 			this.addCommand({
-				id: 'open-settings',
-				name: '打开设置',
-				callback: () => {
-					(this.app as any).setting.open();
-				}
-			});
-
-			this.addCommand({
 				id: 'open-calendar',
 				name: '打开日历',
 				callback: () => {
 					this.openCalendarView();
 				}
 			});
+
+			this.hideSettingsTabFromSidebar();
 
 			new Notice('LifeWiki 已加载');
 			console.log('LifeWiki: loaded successfully');
@@ -173,6 +119,27 @@ export default class LifeWikiPlugin extends Plugin {
 			}
 			this.settingTab = undefined;
 		}
+		this.settingsNavStyleEl?.remove();
+		this.settingsNavStyleEl = undefined;
+	}
+
+	private hideSettingsTabFromSidebar() {
+		this.settingsNavStyleEl?.remove();
+		const styleEl = document.createElement('style');
+		styleEl.textContent = `
+.vertical-tab-nav-item[data-id="lifewiki-settings"],
+.vertical-tab-nav-item[data-tab-id="lifewiki-settings"],
+.vertical-tab-nav-item[data-id="lifewiki"],
+.vertical-tab-nav-item[data-tab-id="lifewiki"],
+.vertical-tab-nav-item[data-id="lifewiki2"],
+.vertical-tab-nav-item[data-tab-id="lifewiki2"],
+.vertical-tab-nav-item[aria-label="LifeWiki"],
+.vertical-tab-nav-item[aria-label="LifeWiki 2.0"] {
+	display: none !important;
+}
+`;
+		document.head.appendChild(styleEl);
+		this.settingsNavStyleEl = styleEl;
 	}
 
 	async loadSettings() {
@@ -201,6 +168,17 @@ export default class LifeWikiPlugin extends Plugin {
 
 	async saveSettings() {
 		await this.saveData(this.settings);
+		if (this.entityManager) {
+			this.refreshAIStack();
+		}
+	}
+
+	private refreshAIStack() {
+		this.initAIProvider();
+		this.skillExecutor = createSkillExecutor(this.app, this.aiProvider, this.entityManager);
+		this.agentRegistry = new AgentRegistry(this.createProviderManager());
+		this.agentRegistry.registerAgent(new DiaryAgent(this.agentRegistry, this.entityManager, this.app));
+		this.agentRegistry.registerAgent(new ChatAgent(this.agentRegistry, this.entityManager, this.app));
 	}
 
 	private initAIProvider() {
@@ -228,6 +206,37 @@ export default class LifeWikiPlugin extends Plugin {
 		}
 	}
 
+	private createProviderManager(): ProviderManager {
+		const providerManager = new ProviderManager();
+
+		for (const config of this.settings.providers) {
+			const customProvider = new CustomProvider({
+				id: config.id,
+				name: config.name,
+				type: 'custom',
+				endpoint: config.baseUrl,
+				apiKey: config.apiKey,
+				model: config.model,
+				enableThinking: config.enableThinking ?? false,
+				reasoningEffort: config.reasoningEffort || '',
+			});
+			providerManager.registerProvider(customProvider);
+		}
+
+		providerManager.registerProvider(new DefaultAIProvider(this.aiProvider));
+		providerManager.setDefaultProvider('default');
+
+		const mapping = this.settings.agentProviderMapping;
+		if (mapping?.diary) {
+			providerManager.setAgentProvider('diary', mapping.diary);
+		}
+		if (mapping?.chat) {
+			providerManager.setAgentProvider('chat', mapping.chat);
+		}
+
+		return providerManager;
+	}
+
 	private createFallbackProvider(): AIProvider {
 		return {
 			async chat() {
@@ -238,6 +247,7 @@ export default class LifeWikiPlugin extends Plugin {
 					blockId: '',
 					timestamp: new Date().toISOString(),
 					category: '待确认',
+					areas: [],
 					entities: { people: [], projects: [], things: [], ideas: [], knowledge: [] },
 					needsConfirmation: [],
 					aiResponse: 'AI未配置'
@@ -331,6 +341,12 @@ export default class LifeWikiPlugin extends Plugin {
 	updateAIAnalysis(result: AnalysisResult) {
 		if (this.aiAnalysisView) {
 			this.aiAnalysisView.updateAnalysis(result);
+		}
+	}
+
+	updateMemoryAnalysis(result: BlockMemoryAnalysis) {
+		if (this.aiAnalysisView) {
+			this.aiAnalysisView.updateMemoryAnalysis(result);
 		}
 	}
 

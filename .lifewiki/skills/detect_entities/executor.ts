@@ -1,6 +1,14 @@
 /**
- * detect_entities Executor
- * High-efficiency entity detection for diary content
+ * detect_entities Executor - AI-powered entity detection
+ *
+ * Uses AI to identify entities in diary content:
+ * - people (人脉)
+ * - projects (项目/任务)
+ * - things (物品/设备)
+ * - ideas (想法/灵感)
+ * - knowledge (知识/文档)
+ *
+ * Then matches against archived entities using entity index.
  */
 
 import type { App } from 'obsidian';
@@ -8,7 +16,6 @@ import type { EntityManager } from '../../../../entities/manager';
 import type { AIProvider } from '../../../../ai/provider';
 import type { ToolExecutionResult } from '../../types';
 import { EntityIndex, MatchResult } from '../../../src/ai/langgraph/entity-index';
-import { extractPotentialNames } from '../../../src/ai/langgraph/string-matcher';
 
 export interface DetectEntitiesInput {
   diaryContent: string;
@@ -30,16 +37,12 @@ export interface DetectedEntity {
   entityId?: string;
   type?: string;
   inferredType?: 'person' | 'project' | 'thing' | 'idea' | 'knowledge';
-  subType?: string;  // e.g., '人', '项目', '任务', '产品/设备', '想法', '文章/文档'
+  subType?: string;
   matchType?: 'exact' | 'alias' | 'simplified' | 'traditional' | 'trie' | 'edit_distance';
   confidence: number;
   reason?: string;
-  // Phase 1: Auto-confirmation for high confidence inferred types
   autoConfirmed?: boolean;
 }
-
-// Threshold for auto-confirmation of inferred types
-const AUTO_CONFIRM_THRESHOLD = 0.85;
 
 // Singleton index cache
 let entityIndexCache: EntityIndex | null = null;
@@ -51,27 +54,65 @@ const INDEX_CACHE_TTL = 60 * 1000; // 1 minute cache
  */
 async function getEntityIndex(entityManager: EntityManager): Promise<EntityIndex> {
   const now = Date.now();
-
-  // Return cached index if fresh
   if (entityIndexCache && (now - lastIndexTime) < INDEX_CACHE_TTL) {
     return entityIndexCache;
   }
 
-  // Build new index
-  await entityManager.ensureInitialized();
-
-  const entities = [
-    ...await entityManager.getEntitiesByType('person'),
-    ...await entityManager.getEntitiesByType('project'),
-    ...await entityManager.getEntitiesByType('thing'),
-    ...await entityManager.getEntitiesByType('idea'),
-    ...await entityManager.getEntitiesByType('knowledge')
-  ];
-
-  entityIndexCache = new EntityIndex(entities);
+  const entities = entityManager.getAllEntities();
+  entityIndexCache = new EntityIndex();
+  entityIndexCache.buildIndex(entities);
   lastIndexTime = now;
-
   return entityIndexCache;
+}
+
+/**
+ * Use AI to identify entities in diary content
+ */
+async function AIIdentifyEntities(
+  diaryContent: string,
+  aiProvider: AIProvider
+): Promise<Array<{ name: string; inferredType: string; confidence: number; reason: string }>> {
+  const systemPrompt = `你是一个实体识别专家。分析日记内容，识别其中提到的人物、项目、任务、想法、知识等实体。
+
+返回JSON格式：
+{"entities": [{"name": "实体名称", "inferredType": "person|project|task|location|idea|knowledge", "confidence": 0.0-1.0, "reason": "识别理由"}]}
+
+规则：
+- person: 具体人名（如张成、李四）
+- project: 有明确目标的工作、项目名称（如"华为项目"、"新版本开发"）
+- task: 具体任务、待办事项
+- location: 地点、场所（如"机房间"、"办公室"）
+- idea: 想法、灵感、概念
+- knowledge: 文章、书籍、课程、文档
+
+重要：
+- 公司名（如烽火公司、华为）不要作为实体返回，它们是人脉的元数据
+- 如果日记中说"烽火公司的张成"，只返回张成（person），烽火公司是这个人的公司属性
+- 只有当公司名独立出现且不是某个人所属时，才可以考虑返回location
+
+只返回真正在日记中明确提到的实体。`;
+
+  const userMessage = `日记内容：\n${diaryContent}`;
+
+  try {
+    const response = await aiProvider.chat([
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userMessage }
+    ]);
+
+    // Parse JSON from response
+    const text = response.content || '';
+    console.log('[detect_entities] AI response:', text.substring(0, 200));
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]);
+      return parsed.entities || [];
+    }
+    return [];
+  } catch (error) {
+    console.error('[detect_entities] AI identification failed:', error);
+    return [];
+  }
 }
 
 /**
@@ -79,22 +120,13 @@ async function getEntityIndex(entityManager: EntityManager): Promise<EntityIndex
  */
 function extractLocalFilePaths(text: string): string[] {
   const paths: string[] = [];
-
-  // Match ~/path/path.md or /Users/xxx/path.md
-  const homePathRegex = /~\/[\w\-\/\.]+\.md/g;
-  const absPathRegex = /\/[\w\-\/\.]+\.md/g;
-
+  // Match ~/path, /path, or drive:\path
+  const pathRegex = /(?:~|\/|[A-Za-z]:\\)[^\s,，.。]+/g;
   let match;
-  while ((match = homePathRegex.exec(text)) !== null) {
+  while ((match = pathRegex.exec(text)) !== null) {
     paths.push(match[0]);
   }
-  while ((match = absPathRegex.exec(text)) !== null) {
-    if (!match[0].startsWith('//')) { // Skip URLs
-      paths.push(match[0]);
-    }
-  }
-
-  return [...new Set(paths)]; // Deduplicate
+  return paths;
 }
 
 /**
@@ -102,21 +134,16 @@ function extractLocalFilePaths(text: string): string[] {
  */
 function extractWebUrls(text: string): string[] {
   const urls: string[] = [];
-
-  // Match http/https URLs
-  const urlRegex = /https?:\/\/[^\s<>"{}|\\^`\[\]]+/g;
-
+  const urlRegex = /https?:\/\/[^\s,，.。]+/g;
   let match;
   while ((match = urlRegex.exec(text)) !== null) {
     urls.push(match[0]);
   }
-
-  return [...new Set(urls)]; // Deduplicate
+  return urls;
 }
 
-
 /**
- * Detect entities in diary content
+ * Main executor function
  */
 export async function detectEntitiesExecutor(
   context: {
@@ -128,6 +155,9 @@ export async function detectEntitiesExecutor(
   input: DetectEntitiesInput
 ): Promise<ToolExecutionResult> {
   try {
+    console.log('[detect_entities] Starting AI-powered entity detection');
+    console.log('[detect_entities] Content:', input.diaryContent.substring(0, 50));
+
     // Ensure we have options
     const options = {
       enableFuzzyMatch: true,
@@ -137,44 +167,54 @@ export async function detectEntitiesExecutor(
       ...input.options
     };
 
-    // Step 1: Get entity index
+    // Step 1: Get entity index for matching
     const index = await getEntityIndex(context.entityManager);
 
-    // Step 2: Extract potential entity names from text
-    const detectedNames = extractPotentialNames(input.diaryContent);
+    // Step 2: Use AI to identify entities in diary content
+    let aiIdentifiedEntities: Array<{ name: string; inferredType: string; confidence: number; reason: string }> = [];
+    if (context.aiProvider) {
+      aiIdentifiedEntities = await AIIdentifyEntities(input.diaryContent, context.aiProvider);
+      console.log('[detect_entities] AI identified entities:', aiIdentifiedEntities.length);
+    } else {
+      console.log('[detect_entities] No AI provider, skipping AI identification');
+    }
 
-    // Step 3: Batch lookup for archived entities
+    // Step 3: Match AI-identified entities against archived entities
     const archivedMatches: DetectedEntity[] = [];
-    const newEntityNames: string[] = [];
+    const newEntities: DetectedEntity[] = [];
 
-    for (const name of detectedNames) {
-      const matchResult = index.findBestMatch(name);
+    for (const entity of aiIdentifiedEntities) {
+      const matchResult = index.findBestMatch(entity.name);
 
       if (matchResult.entity && matchResult.matchType) {
+        // Found in archive
         archivedMatches.push({
-          name,
+          name: entity.name,
           entityId: matchResult.entity.id,
           type: matchResult.entity.type,
-          matchType: matchResult.matchType as 'exact' | 'alias' | 'trie' | 'edit_distance',
-          confidence: matchResult.confidence
+          inferredType: entity.inferredType as any,
+          matchType: matchResult.matchType as any,
+          confidence: Math.min(matchResult.confidence, entity.confidence),
+          reason: entity.reason,
+          autoConfirmed: entity.confidence >= 0.85
         });
       } else {
-        newEntityNames.push(name);
+        // New entity (not in archive)
+        newEntities.push({
+          name: entity.name,
+          inferredType: entity.inferredType as any,
+          confidence: entity.confidence,
+          reason: entity.reason,
+          autoConfirmed: entity.confidence >= 0.85
+        });
       }
     }
 
-    // Step 4: Return new entity names for AI to infer types
-    // Type inference is done by AI Agent based on SKILL.md rules
-    const newEntities: DetectedEntity[] = newEntityNames.map(name => ({
-      name,
-      confidence: 0
-    }));
-
-    // Step 5: Extract local files and web links
+    // Step 4: Extract local files and web links
     const localFiles = options.includeLocalFiles ? extractLocalFilePaths(input.diaryContent) : [];
     const webLinks = options.includeWebLinks ? extractWebUrls(input.diaryContent) : [];
 
-    // Step 6: Handle batch add_interaction for archived entities
+    // Step 5: Handle batch add_interaction for archived entities
     const interactionResults: Array<{ entityId: string; success: boolean; error?: string }> = [];
     if (options.addInteractionsToArchived && options.addInteractionsToArchived.length > 0) {
       for (const interaction of options.addInteractionsToArchived) {
@@ -196,7 +236,14 @@ export async function detectEntitiesExecutor(
       }
     }
 
-    // Step 7: Return structured result
+    console.log('[detect_entities] Results:', {
+      archived: archivedMatches.length,
+      new: newEntities.length,
+      files: localFiles.length,
+      links: webLinks.length
+    });
+
+    // Step 6: Return structured result
     return {
       success: true,
       data: {
@@ -215,17 +262,10 @@ export async function detectEntitiesExecutor(
       }
     };
   } catch (error) {
+    console.error('[detect_entities] Error:', error);
     return {
       success: false,
-      error: `Failed to detect entities: ${(error as Error).message}`
+      error: `Detect entities failed: ${(error as Error).message}`
     };
   }
-}
-
-/**
- * Clear entity index cache (for testing or memory management)
- */
-export function clearEntityIndexCache(): void {
-  entityIndexCache = null;
-  lastIndexTime = 0;
 }

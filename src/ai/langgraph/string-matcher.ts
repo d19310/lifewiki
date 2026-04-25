@@ -240,16 +240,59 @@ export function isSimilar(a: string, b: string, threshold = 2): boolean {
 
 /**
  * Extract potential entity names from text
- * Simple regex-based extraction for Chinese and English names
+ * Smarter extraction for Chinese and English names
  */
 export function extractPotentialNames(text: string): string[] {
   const names: Set<string> = new Set();
 
-  // Chinese names (2-4 characters)
-  const chineseNameRegex = /[\u4e00-\u9fa5]{2,4}/g;
+  // Common Chinese surnames (partial list - most common)
+  const surnames = new Set([
+    '李', '王', '张', '刘', '陈', '杨', '赵', '黄', '周', '吴',
+    '徐', '孙', '胡', '朱', '高', '林', '何', '郭', '马', '罗',
+    '梁', '宋', '郑', '谢', '韩', '唐', '冯', '于', '董', '萧',
+    '程', '曹', '袁', '邓', '许', '傅', '沈', '曾', '彭', '吕',
+    '苏', '卢', '蒋', '蔡', '贾', '丁', '魏', '薛', '叶', '阎',
+    '余', '潘', '杜', '戴', '夏', '钟', '汪', '田', '任', '姜',
+    '范', '方', '石', '姚', '谭', '廖', '邹', '熊', '金', '陆',
+    '郝', '孔', '白', '崔', '康', '毛', '邱', '秦', '江', '史',
+    '顾', '侯', '邵', '孟', '龙', '万', '段', '雷', '钱', '汤',
+    '尹', '黎', '易', '常', '武', '乔', '贺', '赖', '龚', '文'
+  ]);
+
+  // Common words/phrases that are NOT names (to filter out)
+  const notNamePatterns = [
+    '我们', '你们', '他们', '这个', '那个', '什么', '怎么', '如何',
+    '因为', '所以', '但是', '如果', '虽然', '或者', '以及',
+    '开始', '进行', '完成', '工作', '生活', '学习', '问题',
+    '今天', '明天', '昨天', '现在', '已经', '正在', '将要',
+    '公司', '项目', '会议', '讨论', '沟通', '提高', '效率',
+    '一个', '一些', '一样', '一起', '一直', '一定', '不能',
+    '没有', '有些', '其中', '可以', '需要', '应该', '关于'
+  ];
+  const notNameSet = new Set(notNamePatterns);
+
+  // Extract 2-character Chinese strings
+  const twoCharRegex = /[\u4e00-\u9fa5]{2}/g;
   let match;
-  while ((match = chineseNameRegex.exec(text)) !== null) {
-    names.add(match[0]);
+  while ((match = twoCharRegex.exec(text)) !== null) {
+    const name = match[0];
+    // Filter out obvious non-names
+    if (notNameSet.has(name)) continue;
+    // 2-char name should start with a common surname or be a known name pattern
+    if (surnames.has(name[0])) {
+      names.add(name);
+    }
+  }
+
+  // Extract 3-character Chinese strings (less common names or title+name)
+  const threeCharRegex = /[\u4e00-\u9fa5]{3}/g;
+  while ((match = threeCharRegex.exec(text)) !== null) {
+    const name = match[0];
+    if (notNameSet.has(name)) continue;
+    // 3-char name: surname + 2-char given name is most common
+    if (surnames.has(name[0])) {
+      names.add(name);
+    }
   }
 
   // English names (capitalized words)
@@ -260,3 +303,4 @@ export function extractPotentialNames(text: string): string[] {
 
   return Array.from(names);
 }
+

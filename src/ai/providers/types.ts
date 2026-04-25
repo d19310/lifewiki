@@ -10,6 +10,8 @@ export interface CustomProviderConfig {
 	endpoint: string;
 	apiKey?: string;
 	model: string;
+	enableThinking?: boolean;
+	reasoningEffort?: '' | 'high' | 'max';
 	extraParams?: Record<string, unknown>;
 }
 

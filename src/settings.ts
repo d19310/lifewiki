@@ -9,6 +9,8 @@ export interface ProviderConfig {
 	baseUrl: string;
 	apiKey: string;
 	model: string;
+	enableThinking?: boolean;
+	reasoningEffort?: '' | 'high' | 'max';
 }
 
 export interface LifeWikiSettings {
@@ -32,12 +34,14 @@ export function createProviderFromConfig(config: ProviderConfig): AIProvider {
 		apiKey: config.apiKey,
 		baseUrl: config.baseUrl,
 		model: config.model,
+		enableThinking: config.enableThinking ?? false,
+		reasoningEffort: config.reasoningEffort || '',
 	});
 }
 
 export class LifeWikiSettingTab extends SettingTab {
 	plugin: LifeWikiPlugin;
-	id: string = 'lifewiki-settings';
+	id: string = 'lifewiki';
 	name: string = 'LifeWiki';
 	icon: string = 'bookmark';
 
@@ -61,6 +65,8 @@ export class LifeWikiSettingTab extends SettingTab {
 		let providerModel = '';
 		let providerBaseUrl = '';
 		let providerApiKey = '';
+		let providerEnableThinking = false;
+		let providerReasoningEffort: '' | 'high' | 'max' = '';
 
 		const formContainer = containerEl.createEl('div', {
 			cls: 'lifewiki-provider-form'
@@ -87,7 +93,7 @@ export class LifeWikiSettingTab extends SettingTab {
 		// Base URL
 		new Setting(formContainer)
 			.setName('Base URL')
-			.setDesc('API 地址，如 https://api.openai.com/v1')
+			.setDesc('OpenAI 兼容 API 地址，如 https://api.openai.com/v1、https://api.deepseek.com/v1')
 			.addText(text => {
 				text.setPlaceholder('https://api.openai.com/v1')
 					.onChange(value => { providerBaseUrl = value; });
@@ -101,6 +107,28 @@ export class LifeWikiSettingTab extends SettingTab {
 				text.setPlaceholder('')
 					.onChange(value => { providerApiKey = value; });
 				text.inputEl.type = 'password';
+			});
+
+		new Setting(formContainer)
+			.setName('思考模式')
+			.setDesc('默认关闭。开启后请求体会带上 {"thinking":{"type":"enabled"}}。')
+			.addToggle(toggle => {
+				toggle.setValue(providerEnableThinking)
+					.onChange(value => { providerEnableThinking = value; });
+			});
+
+		new Setting(formContainer)
+			.setName('Reasoning Effort')
+			.setDesc('默认不发送。部分 OpenAI 兼容模型支持 high 或 max。')
+			.addDropdown(dropdown => {
+				dropdown
+					.addOption('', '默认')
+					.addOption('high', 'high')
+					.addOption('max', 'max')
+					.setValue(providerReasoningEffort)
+					.onChange(value => {
+						providerReasoningEffort = value as '' | 'high' | 'max';
+					});
 			});
 
 		// Save button
@@ -120,6 +148,8 @@ export class LifeWikiSettingTab extends SettingTab {
 						model: providerModel,
 						baseUrl: providerBaseUrl,
 						apiKey: providerApiKey,
+						enableThinking: providerEnableThinking,
+						reasoningEffort: providerReasoningEffort,
 					});
 					await this.plugin.saveSettings();
 					this.display();
@@ -132,7 +162,29 @@ export class LifeWikiSettingTab extends SettingTab {
 			const provider = this.plugin.settings.providers[i];
 			const providerSetting = new Setting(containerEl)
 				.setName(provider.name)
-				.setDesc(`${provider.baseUrl} / ${provider.model}`);
+				.setDesc(`${provider.baseUrl} / ${provider.model}${provider.enableThinking ? ' / thinking:on' : ''}${provider.reasoningEffort ? ` / reasoning:${provider.reasoningEffort}` : ''}`);
+
+			providerSetting.addToggle(toggle => {
+				toggle
+					.setTooltip('思考模式')
+					.setValue(provider.enableThinking ?? false)
+					.onChange(async (value) => {
+						provider.enableThinking = value;
+						await this.plugin.saveSettings();
+					});
+			});
+
+			providerSetting.addDropdown(dropdown => {
+				dropdown
+					.addOption('', '默认')
+					.addOption('high', 'high')
+					.addOption('max', 'max')
+					.setValue(provider.reasoningEffort || '')
+					.onChange(async (value) => {
+						provider.reasoningEffort = value as '' | 'high' | 'max';
+						await this.plugin.saveSettings();
+					});
+			});
 
 			// Test button
 			providerSetting.addButton(btn => {

@@ -42,6 +42,23 @@ function stableId(str: string): string {
 	return `${hex.substring(0, 8)}-${hex.substring(0, 4)}-4${hex.substring(0, 3)}-${hex.substring(0, 4)}-${hex.substring(0, 12)}`;
 }
 
+function normalizeBlockTags(value: string | string[] | undefined): string[] {
+	const raw = Array.isArray(value) ? value.join(' ') : value || '';
+	return Array.from(new Set(raw
+		.split(/[\s,，#]+/)
+		.map((tag) => tag.trim())
+		.filter(Boolean)
+	)).slice(0, 6);
+}
+
+function tagsToCategory(tags: string[]): string {
+	return normalizeBlockTags(tags).join(' ') || '待分析';
+}
+
+function renderHeaderTags(category: string): string {
+	return normalizeBlockTags(category).map((tag) => `#${tag}`).join(' ') || '#待分析';
+}
+
 interface ChildBlock {
 	id: string;
 	timestamp: string;      // HH:mm
@@ -89,6 +106,74 @@ export class BlockEditorView extends ItemView {
 		super(leaf);
 		this.plugin = plugin;
 		this.currentDate = this.formatDate(new Date());
+	}
+
+	/**
+	 * Get a block by ID (public method for external access)
+	 */
+	getBlockById(blockId: string): ParsedBlock | undefined {
+		return this.blocks.find(b => b.id === blockId);
+	}
+
+	/**
+	 * Focus a parent or child block from external views.
+	 */
+	focusBlockById(blockId: string): boolean {
+		const parentBlock = this.blocks.find(b => b.id === blockId);
+		if (parentBlock) {
+			this.selectedBlockId = blockId;
+			this.isAppendMode = false;
+			this.appendModeBlockId = null;
+			this.isEditMode = false;
+			this.editModeBlockId = null;
+			this.renderBlocks();
+			this.scrollBlockIntoView(blockId);
+			return true;
+		}
+
+		for (const block of this.blocks) {
+			const child = block.children.find(c => c.id === blockId);
+			if (!child) continue;
+
+			this.selectedBlockId = blockId;
+			this.isAppendMode = false;
+			this.appendModeBlockId = null;
+			this.isEditMode = false;
+			this.editModeBlockId = null;
+			this.renderBlocks();
+			this.scrollBlockIntoView(blockId, true);
+			return true;
+		}
+
+		return false;
+	}
+
+	/**
+	 * Focus a diary block and enter append mode so the user can add a follow-up note.
+	 */
+	startAppendForBlock(blockId: string, prompt?: string): boolean {
+		let targetBlockId = blockId;
+		const parentBlock = this.blocks.find(b => b.id === blockId);
+
+		if (!parentBlock) {
+			const parent = this.blocks.find(b => b.children.some(c => c.id === blockId));
+			if (!parent) return false;
+			targetBlockId = parent.id;
+		}
+
+		this.selectBlock(targetBlockId);
+		this.scrollBlockIntoView(targetBlockId);
+
+		if (prompt && this.inputTextarea) {
+			this.inputTextarea.placeholder = prompt;
+			if (this.inputHintEl) {
+				this.inputHintEl.textContent = prompt;
+				this.inputHintEl.removeAttribute('style');
+			}
+			setTimeout(() => this.inputTextarea?.focus(), 0);
+		}
+
+		return true;
 	}
 
 	getViewType(): string {
@@ -328,10 +413,7 @@ export class BlockEditorView extends ItemView {
 				box-shadow: 0 10px 40px -10px rgba(26, 28, 28, 0.06);
 				border: 1px solid rgba(204, 195, 214, 0.15);
 				transition: box-shadow 0.2s ease;
-				display: flex;
-				flex-wrap: wrap;
-				align-items: baseline;
-				gap: 8px;
+				display: block;
 			}
 
 			.lifewiki-block:hover .lifewiki-block-card {
@@ -393,11 +475,14 @@ export class BlockEditorView extends ItemView {
 				content: ']';
 			}
 
-			/* Main wrapper - inline-flex to keep timestamp and content on same line */
+			/* Main wrapper - timestamp column + content column */
 			.lifewiki-main-wrapper {
-				display: inline-flex;
+				display: grid;
+				grid-template-columns: auto minmax(0, 1fr);
+				column-gap: 10px;
+				row-gap: 8px;
 				align-items: baseline;
-				gap: 6px;
+				width: 100%;
 			}
 
 			/* Block Content Text - takes remaining space */
@@ -409,6 +494,15 @@ export class BlockEditorView extends ItemView {
 				flex: 1;
 				white-space: pre-wrap;
 				word-break: break-word;
+				min-width: 0;
+			}
+
+			.lifewiki-block-tags {
+				grid-column: 2;
+				display: flex;
+				flex-wrap: wrap;
+				gap: 6px;
+				align-items: center;
 				min-width: 0;
 			}
 
@@ -443,33 +537,20 @@ export class BlockEditorView extends ItemView {
 				gap: 4px;
 			}
 
-			/* Tag Badge - smaller font, primary color */
+			/* Tag Badge - follows Obsidian theme tag variables */
 			.lifewiki-block-tag {
-				font-size: 12px;
-				padding: 2px 8px;
-				border-radius: 20px;
+				display: inline-flex;
+				align-items: center;
+				font-size: var(--tag-size, 12px);
+				padding: var(--tag-padding-y, 2px) var(--tag-padding-x, 8px);
+				border-radius: var(--tag-radius, 20px);
 				font-weight: 500;
 				font-family: var(--font-body);
-			}
-
-			.lifewiki-block-tag.工作 {
-				background: rgba(92, 40, 184, 0.1);
-				color: var(--primary);
-			}
-
-			.lifewiki-block-tag.个人 {
-				background: rgba(114, 65, 0, 0.1);
-				color: var(--tertiary);
-			}
-
-			.lifewiki-block-tag.学习 {
-				background: rgba(103, 85, 142, 0.1);
-				color: var(--secondary);
-			}
-
-			.lifewiki-block-tag.待确认 {
-				background: rgba(123, 116, 133, 0.1);
-				color: var(--on-surface-variant);
+				color: var(--tag-color, var(--text-accent));
+				background: var(--tag-background, var(--background-modifier-hover));
+				border: var(--tag-border-width, 0) solid var(--tag-border-color, transparent);
+				text-decoration: none;
+				white-space: nowrap;
 			}
 
 			/* Category Badge - Pill style (for header) */
@@ -1025,9 +1106,19 @@ export class BlockEditorView extends ItemView {
 
 		// Arrow button on bottom-right (circular with arrow)
 		const arrowBtn = inputBottomEl.createEl('button', {
-			cls: 'lifewiki-diary-send-btn'
+			cls: 'lifewiki-diary-send-btn',
+			attr: { type: 'button', title: '发送日记' }
 		});
 		setIcon(arrowBtn, 'arrow-up');
+		arrowBtn.addEventListener('click', (event) => {
+			event.preventDefault();
+			event.stopPropagation();
+			if (this.isAppendMode) {
+				void this.submitAppend();
+			} else if (this.inputTextarea) {
+				void this.submitBlock(this.inputTextarea);
+			}
+		});
 
 		// Focus handler - scroll to last block and switch to analysis mode
 		this.inputTextarea.addEventListener('focus', () => {
@@ -1130,8 +1221,8 @@ export class BlockEditorView extends ItemView {
 		let pendingBlockId: string | null = null; // Block ID found on separate line after content
 
 		for (const line of lines) {
-			// Match H3 header: ### HH:mm [source] #category
-			const headerMatch = line.match(/^### (\d{2}:\d{2}) \[([^\]]+)\] #(\S+)/);
+			// Match H3 header: ### HH:mm [source] #tag #tag2
+			const headerMatch = line.match(/^### (\d{2}:\d{2}) \[([^\]]+)\]\s+(.+)$/);
 			if (headerMatch) {
 				// Save previous block if exists
 				if (currentBlock) {
@@ -1150,7 +1241,7 @@ export class BlockEditorView extends ItemView {
 					id: stableId(headerMatch[0]),
 					timestamp: headerMatch[1],
 					source: headerMatch[2],
-					category: headerMatch[3],
+					category: tagsToCategory(normalizeBlockTags(headerMatch[3])),
 					content: '',
 					children: [],
 					parentId: null
@@ -1314,6 +1405,14 @@ export class BlockEditorView extends ItemView {
 		this.contentContainer.scrollTop = this.contentContainer.scrollHeight;
 	}
 
+	private scrollBlockIntoView(blockId: string, isChild: boolean = false) {
+		setTimeout(() => {
+			const selector = isChild ? `[data-child-id="${blockId}"]` : `[data-block-id="${blockId}"]`;
+			const el = this.contentContainer?.querySelector(selector) as HTMLElement | null;
+			el?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+		}, 50);
+	}
+
 	/**
 	 * Render a single block
 	 */
@@ -1380,17 +1479,22 @@ export class BlockEditorView extends ItemView {
 					cls: 'lifewiki-block-timestamp'
 				});
 
-				// Tag
-				mainWrapper.createEl('span', {
-					text: block.category,
-					cls: `lifewiki-block-tag ${block.category}`
-				});
-
 				// Content
 				mainWrapper.createEl('span', {
 					text: block.content,
 					cls: 'lifewiki-block-content'
 				});
+
+				const tagsEl = mainWrapper.createEl('div', {
+					cls: 'lifewiki-block-tags'
+				});
+				for (const tag of normalizeBlockTags(block.category)) {
+					tagsEl.createEl('a', {
+						text: `#${tag}`,
+						cls: 'tag lifewiki-block-tag',
+						attr: { href: `#${tag}`, 'data-tag': tag }
+					});
+				}
 			}
 		}
 
@@ -2079,7 +2183,7 @@ export class BlockEditorView extends ItemView {
 		const lines = content.split('\n');
 
 		// Find the line with the parent block header
-		const parentHeader = `### ${parentBlock.timestamp} [${parentBlock.source}] #${parentBlock.category}`;
+		const parentHeader = `### ${parentBlock.timestamp} [${parentBlock.source}] ${renderHeaderTags(parentBlock.category)}`;
 		let parentLineIndex = -1;
 
 		for (let i = 0; i < lines.length; i++) {
@@ -2147,7 +2251,7 @@ export class BlockEditorView extends ItemView {
 		// Find the line with the block header by timestamp only
 		// Use regex to match header pattern: ### HH:mm [source] #category
 		let blockLineIndex = -1;
-		const headerRegex = new RegExp(`^### ${block.timestamp} \\[([^\\]]+)\\] #(\\S+)`);
+		const headerRegex = new RegExp(`^### ${block.timestamp} \\[([^\\]]+)\\]\\s+(.+)`);
 		for (let i = 0; i < lines.length; i++) {
 			const match = lines[i].match(headerRegex);
 			if (match) {
@@ -2159,7 +2263,7 @@ export class BlockEditorView extends ItemView {
 		if (blockLineIndex === -1) return;
 
 		// Rebuild the block header (block ID is kept at end of content)
-		const newHeader = `### ${block.timestamp} [${block.source}] #${block.category}`;
+		const newHeader = `### ${block.timestamp} [${block.source}] ${renderHeaderTags(block.category)}`;
 		lines[blockLineIndex] = newHeader;
 
 		// Update content lines (after header, until next ### or child)
@@ -2254,13 +2358,13 @@ export class BlockEditorView extends ItemView {
 					date: this.currentDate
 				}
 			);
-			const newContent = templateContent + `\n### ${block.timestamp} [${block.source}] #${block.category}\n${block.content}\n<!-- ${block.id} -->\n`;
+			const newContent = templateContent + `\n### ${block.timestamp} [${block.source}] ${renderHeaderTags(block.category)}\n${block.content}\n<!-- ${block.id} -->\n`;
 			await this.app.vault.create(dailyPath, newContent);
 			return;
 		}
 
 		// Build block text with block ID as HTML comment (invisible in rendered view)
-		const blockText = `\n### ${block.timestamp} [${block.source}] #${block.category}\n${block.content}\n<!-- ${block.id} -->\n`;
+		const blockText = `\n### ${block.timestamp} [${block.source}] ${renderHeaderTags(block.category)}\n${block.content}\n<!-- ${block.id} -->\n`;
 
 		const existing = await this.app.vault.read(file);
 		await this.app.vault.modify(file, existing + blockText);
@@ -2313,25 +2417,34 @@ export class BlockEditorView extends ItemView {
 		}
 
 		try {
-			// Use LangGraph agent
-			const agent = this.plugin.getLangGraphAgent();
+			// Use AgentRegistry to get the correct agent with proper provider
+			const agentRegistry = this.plugin.getAgentRegistry();
+			const agent = agentRegistry?.getAgent('diary');
 			if (agent) {
-				result = await agent.startBlockAnalysis(block.id, block.content, effectiveParentId, siblingBlocks);
+				result = await agent.start({ blockId: block.id, content: block.content, parentId: effectiveParentId, siblingBlocks });
 			} else {
 				throw new Error('AI agent not available');
 			}
+
+			const persistedSession = result.session
+				? sessionManager.setSession(block.id, result.session, effectiveParentId)
+				: null;
 
 			// Notify AI panel - use parent's content if child block
 			if (aiView) {
 				const displayContent = effectiveParentId
 					? this.blocks.find(b => b.id === effectiveParentId)?.content || block.content
 					: block.content;
-				aiView.startNewSession(block.id, displayContent, result.initialResponse || '', effectiveParentId);
+				if (persistedSession) {
+					aiView.showAgentSession(block.id, displayContent, persistedSession, effectiveParentId);
+				} else {
+					aiView.startNewSession(block.id, displayContent, result.response || '', effectiveParentId);
+				}
 			}
 
 			// Update block category based on AI analysis result (only for parent blocks with initial placeholder)
 			if (!effectiveParentId && (block as ParsedBlock).category === '待分析' && result.areas && result.areas.length > 0) {
-				const newCategory = result.areas[0];
+				const newCategory = tagsToCategory(result.areas);
 				(block as ParsedBlock).category = newCategory;
 				await this.saveBlockToFile(block as ParsedBlock);
 				// Refresh the view to show updated category tag
@@ -2357,7 +2470,7 @@ export class BlockEditorView extends ItemView {
 			const analysisResult = await provider.analyzeBlock(block.content);
 
 			if (analysisResult.areas && analysisResult.areas.length > 0) {
-				const newCategory = analysisResult.areas[0];
+				const newCategory = tagsToCategory(analysisResult.areas);
 				block.category = newCategory;
 				await this.saveBlockToFile(block);
 			}

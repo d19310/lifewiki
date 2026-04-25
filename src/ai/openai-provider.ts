@@ -11,6 +11,8 @@ export interface OpenAIConfig {
   baseUrl?: string;
   model?: string;
   timeout?: number;
+  enableThinking?: boolean;
+  reasoningEffort?: '' | 'high' | 'max';
 }
 
 interface OpenAIRequest {
@@ -18,6 +20,8 @@ interface OpenAIRequest {
   messages: { role: string; content: string }[];
   temperature?: number;
   max_tokens?: number;
+  thinking?: { type: 'enabled' | 'disabled' };
+  reasoning_effort?: 'high' | 'max';
 }
 
 interface OpenAIResponse {
@@ -50,15 +54,19 @@ export class OpenAIProvider {
   private baseUrl: string;
   private model: string;
   private timeout: number;
+  private enableThinking: boolean;
+  private reasoningEffort: '' | 'high' | 'max';
 
   constructor(config: OpenAIConfig) {
     if (!config.apiKey) {
       throw new Error('API key is required for OpenAI');
     }
     this.apiKey = config.apiKey;
-    this.baseUrl = config.baseUrl || DEFAULT_BASE_URL;
+    this.baseUrl = (config.baseUrl || DEFAULT_BASE_URL).replace(/\/+$/, '');
     this.model = config.model || DEFAULT_MODEL;
     this.timeout = config.timeout || DEFAULT_TIMEOUT;
+    this.enableThinking = config.enableThinking ?? false;
+    this.reasoningEffort = config.reasoningEffort || '';
   }
 
   async chat(messages: ChatMessage[]): Promise<ChatResponse> {
@@ -71,8 +79,12 @@ export class OpenAIProvider {
         content: m.content
       })),
       temperature: 0.7,
-      max_tokens: 1000
+      max_tokens: 1000,
+      thinking: { type: this.enableThinking ? 'enabled' : 'disabled' }
     };
+    if (this.reasoningEffort) {
+      request.reasoning_effort = this.reasoningEffort;
+    }
 
     try {
       // Use Obsidian's requestUrl to bypass CORS

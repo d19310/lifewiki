@@ -393,13 +393,13 @@ const TOOLS = [
 	}
 ];
 
-// Phase order
+// Phase order - 5-step analysis flow
 const PHASES = [
-	Phase.People,
-	Phase.Projects,
-	Phase.Things,
-	Phase.Ideas,
-	Phase.Knowledge,
+	Phase.Detection,   // Step 1: Detect all entities
+	Phase.Processing,  // Step 2: Create/update entities
+	Phase.Relations,    // Step 3: Discover relations
+	Phase.Conflicts,   // Step 4: Detect conflicts
+	Phase.Summary,     // Step 5: Generate summary
 	Phase.Complete
 ];
 
@@ -431,7 +431,7 @@ export function createInitialState(blockId: string, content: string): AnalysisSt
 		blockId,
 		blockContent: content,
 		messages: [new HumanMessage({ content })],
-		currentPhase: Phase.People,
+		currentPhase: Phase.Detection,
 		entities: {
 			people: [],
 			projects: [],
@@ -508,12 +508,12 @@ export class BlockAnalysisMachine {
 	private buildContinueContext(): string {
 		const phase = this.state.currentPhase;
 		const phaseLabel: Record<string, string> = {
-			people: '人脉（People）',
-			projects: '项目（Projects）',
-			things: '物品（Things）',
-			ideas: '想法（Ideas）',
-			knowledge: '知识（Knowledge）',
-			complete: '完成（Complete）'
+			detection: '检测',
+			processing: '处理',
+			relations: '关联',
+			conflicts: '冲突',
+			summary: '总结',
+			complete: '完成'
 		};
 
 		const entities = this.state.entities;
@@ -524,30 +524,23 @@ export class BlockAnalysisMachine {
 		if (entities.ideas.length > 0) identifiedEntities.push(`想法：${entities.ideas.map((e: any) => e.name || e.title || '未知').join(', ')}`);
 		if (entities.knowledge.length > 0) identifiedEntities.push(`知识：${entities.knowledge.map((e: any) => e.name || e.title || '未知').join(', ')}`);
 
-		return `【继续分析上下文】
+		return `【继续上下文】
 
-当前阶段：${phaseLabel[phase] || phase}
-日记内容：${this.state.blockContent.substring(0, 200)}${this.state.blockContent.length > 200 ? '...' : ''}
+当前任务：${phaseLabel[phase] || phase}
+日记：${this.state.blockContent.substring(0, 150)}${this.state.blockContent.length > 150 ? '...' : ''}
 
-已识别的实体：
-${identifiedEntities.length > 0 ? identifiedEntities.join('\n') : '暂无'}
+已识别实体：${identifiedEntities.length > 0 ? identifiedEntities.join(' / ') : '暂无'}
+已确认：${this.state.confirmedEntities?.length || 0}项
 
-对话历史（最近几条）：
-${this.state.messages.slice(-4).map((m: any) => {
+最近对话：
+${this.state.messages.slice(-6).map((m: any) => {
 			const role = m._getType?.() === 'ai' ? 'AI' : m._getType?.() === 'human' ? '用户' : '系统';
-			const content = typeof m.content === 'string' ? m.content.substring(0, 100) : JSON.stringify(m.content).substring(0, 100);
+			const content = typeof m.content === 'string' ? m.content.substring(0, 80) : JSON.stringify(m.content).substring(0, 80);
 			return `${role}：${content}`;
 		}).join('\n')}
 
-## 重要提醒
+继续多轮对话。一次只问一件事，等用户回复。`;
 
-1. 当前处于 ${phaseLabel[phase] || phase} 阶段，请继续该阶段的分析
-2. 如果需要创建实体，必须使用函数调用格式：
-<function_calls><invoke name="create_entity"><parameter name="name">实体名称</parameter><parameter name="entityType">project</parameter><parameter name="summary">简短描述</parameter></invoke></function_calls>
-3. 如果需要更新已存在的实体，先搜索再添加互动记录
-4. 不要重复创建已存在的实体
-
-请继续分析，用户可能会提供更多信息或确认。`;
 	}
 
 	/**
@@ -755,6 +748,12 @@ ${this.state.messages.slice(-4).map((m: any) => {
 				case 'detect_entities':
 					result = await this.tools.detectEntities(call.args);
 					break;
+				case 'detect_conflicts':
+					result = await this.tools.detectConflicts(call.args as any);
+					break;
+				case 'process_updates':
+					result = await this.tools.processUpdates(call.args as any);
+					break;
 				case 'process_entities':
 					result = await this.tools.processEntities(call.args);
 					break;
@@ -793,9 +792,33 @@ ${this.state.messages.slice(-4).map((m: any) => {
 			console.log(`[BlockAnalysis]   msg[${i}]: ${msg._getType()} - ${content}`);
 		}
 
-		// Invoke LLM - tools are parsed from text response since
-		// not all providers support structured tool_calls
-		const result = await this.llm.invoke(allMessages);
+		// Debug: check if system prompt contains Step 5 and update_block_metadata
+		if (this.systemPrompt.includes('Step 5')) {
+			console.log('[BlockAnalysis] DEBUG: System prompt contains "Step 5"');
+		} else {
+			console.log('[BlockAnalysis] DEBUG: System prompt MISSING "Step 5"');
+		}
+		if (this.systemPrompt.includes('update_block_metadata')) {
+			console.log('[BlockAnalysis] DEBUG: System prompt contains "update_block_metadata"');
+		} else {
+			console.log('[BlockAnalysis] DEBUG: System prompt MISSING "update_block_metadata"');
+		}
+		// Print first 500 chars of system prompt for debugging
+		console.log('[BlockAnalysis] DEBUG: System prompt preview:', this.systemPrompt.substring(0, 500));
+
+		const toolPayload = TOOLS.map((tool) => ({
+			name: tool.name,
+			description: tool.description,
+			schema: tool.parameters
+		}));
+
+		const directChat = (this.llm as any).directChat;
+		if (typeof directChat === 'function') {
+			const result = await directChat.call(this.llm, allMessages, toolPayload);
+			return result.generations[0].message as BaseMessage;
+		}
+
+		const result = await this.llm.bindTools(toolPayload).invoke(allMessages);
 		return result;
 	}
 
@@ -804,7 +827,12 @@ ${this.state.messages.slice(-4).map((m: any) => {
 	 */
 	private async executeTools(toolCalls: any[]): Promise<void> {
 		for (const call of toolCalls) {
-			const { name, arguments: args } = call;
+			const name = call.name;
+			const args = typeof call.args === 'object'
+				? call.args
+				: typeof call.arguments === 'object'
+					? call.arguments
+					: this.safeParseToolArgs(call.args || call.arguments);
 			let result: any;
 
 			console.log(`[BlockAnalysis] Executing tool: ${name}`, args);
@@ -870,6 +898,12 @@ ${this.state.messages.slice(-4).map((m: any) => {
 				case 'detect_entities':
 					result = await this.tools.detectEntities(args);
 					break;
+				case 'detect_conflicts':
+					result = await this.tools.detectConflicts(args as any);
+					break;
+				case 'process_updates':
+					result = await this.tools.processUpdates(args as any);
+					break;
 				case 'process_entities':
 					result = await this.tools.processEntities(args);
 					break;
@@ -889,6 +923,17 @@ ${this.state.messages.slice(-4).map((m: any) => {
 					tool_call_id: call.id || `call_${name}`
 				})
 			);
+		}
+	}
+
+	private safeParseToolArgs(raw: unknown): Record<string, any> {
+		if (!raw) return {};
+		if (typeof raw === 'object') return raw as Record<string, any>;
+		try {
+			const parsed = JSON.parse(String(raw));
+			return parsed && typeof parsed === 'object' ? parsed : {};
+		} catch {
+			return {};
 		}
 	}
 

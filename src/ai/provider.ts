@@ -16,7 +16,10 @@ export interface AIProvider {
   chat(messages: ChatMessage[]): Promise<ChatResponse>;
 
   /**
-   * Analyze a journal block and extract entities
+   * Legacy 1.x entity-first analysis.
+   *
+   * LifeWiki 2.0 block capture uses chat() through CaptureAnalyzer and stores
+   * BlockMemoryAnalysis. Keep this method only for old providers/tests/tools.
    */
   analyzeBlock(content: string): Promise<AnalysisResult>;
 
