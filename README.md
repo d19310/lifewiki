@@ -44,13 +44,13 @@ Vault/
 ### 普通用户安装
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/d19310/lifewiki/main/install.sh | bash
+curl -fsSL https://github.com/d19310/lifewiki/releases/download/v2.0/install.sh | bash
 ```
 
 指定 vault 路径：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/d19310/lifewiki/main/install.sh | bash -s -- -v "$HOME/Documents/LifeWiki"
+curl -fsSL https://github.com/d19310/lifewiki/releases/download/v2.0/install.sh | bash -s -- -v "$HOME/Documents/LifeWiki"
 ```
 
 安装脚本会：
