@@ -3,6 +3,7 @@ import type { AnalysisResult, Entity, EntityType } from '../entities/types';
 import type { EntityManager } from '../entities/manager';
 import { z } from 'zod';
 import { memoryAnalysisToLegacyAnalysisResult } from '../memory/legacy-adapter';
+import { EntityIndex } from './langgraph/entity-index';
 import type {
 	BlockMemoryAnalysis,
 	EventMemory,
@@ -136,9 +137,26 @@ export class CaptureAnalyzer {
 	}): Promise<CaptureAnalyzerResult> {
 		await this.entityManager.ensureInitialized();
 
+		const t0 = performance.now();
 		const now = new Date().toISOString();
 		const entities = this.entityManager.getAllEntities();
-		const entityContext = this.formatEntityContext(entities);
+		const index = new EntityIndex(entities);
+		const t1 = performance.now();
+
+		// Use AC scanning to find entities actually mentioned in content
+		const scannedMatches = index.scanContent(input.content);
+		const t2 = performance.now();
+
+		const promptEntities = this.selectPromptEntities(entities, input.content, index, scannedMatches);
+		const entityContext = this.formatEntityContext(promptEntities);
+
+		console.debug(
+			`[CaptureAnalyzer] block=${input.blockId}, ` +
+			`entities=${entities.length}, acMatches=${scannedMatches.size}, ` +
+			`promptEntities=${promptEntities.length}, ` +
+			`indexBuild=${(t1 - t0).toFixed(1)}ms, acScan=${(t2 - t1).toFixed(1)}ms`
+		);
+
 		const response = await this.provider.chat([
 			{ role: 'system', content: this.buildSystemPrompt() },
 			{ role: 'user', content: this.buildUserPrompt(input.content, entityContext, input.parentId || null, input.siblingBlocks || []) }
@@ -146,23 +164,22 @@ export class CaptureAnalyzer {
 
 		const payload = this.parseResponse(response.content);
 		const evidence = this.createEvidence(input.blockId, input.content, now);
-		const nameToEntity = this.buildEntityLookup(entities);
 		const relatedEntityIds = this.resolveEntityIds([
 			...payload.events.flatMap((event) => event.relatedEntityNames),
 			...payload.knowledgeCapsules.flatMap((capsule) => capsule.relatedEntityNames),
 			...payload.signals.flatMap((signal) => signal.relatedEntityNames),
 			...payload.openLoops.flatMap((openLoop) => openLoop.relatedEntityNames),
 			...payload.entities.map((entity) => entity.name)
-		], nameToEntity);
+		], index);
 
 		const memoryAnalysis: BlockMemoryAnalysis = {
 			blockId: input.blockId,
 			memoryEcho: this.normalizeMemoryEcho(payload.memoryEcho),
 			labels: this.normalizeLabels(payload.labels),
-			events: payload.events.map((event, index) => this.toEventMemory(input.blockId, event, nameToEntity, now, index)),
-			knowledgeCapsules: payload.knowledgeCapsules.map((capsule, index) => this.toKnowledgeCapsule(input.blockId, capsule, nameToEntity, evidence, now, index)),
-			signals: payload.signals.map((signal, index) => this.toSignalMemory(input.blockId, signal, nameToEntity, evidence, now, index)),
-			openLoops: payload.openLoops.map((openLoop, index) => this.toOpenLoopMemory(input.blockId, openLoop, nameToEntity, evidence, now, index)),
+			events: payload.events.map((event, i) => this.toEventMemory(input.blockId, event, index, now, i)),
+			knowledgeCapsules: payload.knowledgeCapsules.map((capsule, i) => this.toKnowledgeCapsule(input.blockId, capsule, index, evidence, now, i)),
+			signals: payload.signals.map((signal, i) => this.toSignalMemory(input.blockId, signal, index, evidence, now, i)),
+			openLoops: payload.openLoops.map((openLoop, i) => this.toOpenLoopMemory(input.blockId, openLoop, index, evidence, now, i)),
 			relatedEntityIds,
 			createdAt: now
 		};
@@ -177,8 +194,8 @@ export class CaptureAnalyzer {
 					name: entity.name,
 					confidence: entity.confidence,
 					context: entity.context,
-					isArchived: nameToEntity.has(entity.name.toLowerCase()),
-					newEntity: !nameToEntity.has(entity.name.toLowerCase())
+					isArchived: index.findExact(entity.name) !== null,
+					newEntity: index.findExact(entity.name) === null
 				})),
 				timestamp: now
 			}),
@@ -237,11 +254,56 @@ ${content}${childContext}
 请输出符合要求的 JSON。`;
 	}
 
+	/**
+	 * Select entities to inject into AI prompt.
+	 * Uses AC scanning to find entities mentioned in content, then fills
+	 * remaining slots with recently updated entities (up to 60 total).
+	 */
+	private selectPromptEntities(
+		entities: Entity[],
+		content: string,
+		index: EntityIndex,
+		scannedMatches: Map<Entity, number[]>
+	): Entity[] {
+		if (entities.length <= 60) return entities;
+
+		// Start with entities found via AC scanning
+		const matched = new Set<Entity>(scannedMatches.keys());
+		const selected: Entity[] = Array.from(matched);
+
+		// Fill remaining slots with recently updated entities
+		const remaining = 60 - selected.length;
+		if (remaining > 0) {
+			const byRecency = entities
+				.filter((e) => !matched.has(e))
+				.sort((a, b) => {
+					const bTime = Date.parse(b.lastUpdated || b.createdAt || '') || 0;
+					const aTime = Date.parse(a.lastUpdated || a.createdAt || '') || 0;
+					return bTime - aTime;
+				});
+			selected.push(...byRecency.slice(0, remaining));
+		}
+
+		return selected;
+	}
+
+	private normalizeForMatch(value: string): string {
+		return value.toLowerCase().replace(/\s+/g, '');
+	}
+
 	private formatEntityContext(entities: Entity[]): string {
 		if (entities.length === 0) return '无';
 		return entities
-			.slice(0, 200)
-			.map((entity) => `- ${entity.title} (${entity.type})${entity.aliases.length ? `，别名：${entity.aliases.join('、')}` : ''}`)
+			.map((entity) => {
+				const meta = entity.metadata || {};
+				const parts: string[] = [];
+				if (meta.company) parts.push(`公司：${meta.company}`);
+				if (meta.role) parts.push(`职位：${meta.role}`);
+				if (meta.relationship_to_user) parts.push(`关系：${meta.relationship_to_user}`);
+				if (meta.owner) parts.push(`负责人：${meta.owner}`);
+				const metaStr = parts.length > 0 ? `，${parts.join('，')}` : '';
+				return `- ${entity.title} (${entity.type})${entity.aliases.length ? `，别名：${entity.aliases.join('、')}` : ''}${metaStr}`;
+			})
 			.join('\n');
 	}
 
@@ -518,22 +580,15 @@ ${content}${childContext}
 		return compact ? `这条日记已记录，后续可以再补充细节：${compact} #待回顾` : '这条日记已保存为候选记忆。#待回顾';
 	}
 
-	private buildEntityLookup(entities: Entity[]): Map<string, Entity> {
-		const lookup = new Map<string, Entity>();
-		for (const entity of entities) {
-			lookup.set(entity.title.toLowerCase(), entity);
-			for (const alias of entity.aliases) {
-				lookup.set(alias.toLowerCase(), entity);
-			}
-		}
-		return lookup;
-	}
-
-	private resolveEntityIds(names: string[], lookup: Map<string, Entity>): string[] {
+	/**
+	 * Resolve entity names to IDs using EntityIndex with layered matching.
+	 * Falls back to findBestMatch for fuzzy matching (alias, prefix, edit distance).
+	 */
+	private resolveEntityIds(names: string[], index: EntityIndex): string[] {
 		const ids = new Set<string>();
 		for (const name of names) {
-			const entity = lookup.get(name.toLowerCase());
-			if (entity) ids.add(entity.id);
+			const match = index.findBestMatch(name);
+			if (match.entity) ids.add(match.entity.id);
 		}
 		return Array.from(ids);
 	}
@@ -580,17 +635,17 @@ ${content}${childContext}
 	private toEventMemory(
 		blockId: string,
 		event: CaptureAnalysisPayload['events'][number],
-		lookup: Map<string, Entity>,
+		index: EntityIndex,
 		now: string,
-		index: number
+		i: number
 	): EventMemory {
 		return {
-			id: this.stableId('event', blockId, event.title, index),
+			id: this.stableId('event', blockId, event.title, i),
 			title: event.title,
 			summary: event.summary,
 			source: 'diary',
 			sourceBlockIds: [blockId],
-			relatedEntityIds: this.resolveEntityIds(event.relatedEntityNames, lookup),
+			relatedEntityIds: this.resolveEntityIds(event.relatedEntityNames, index),
 			occurredAt: now,
 			createdAt: now,
 			confidence: event.confidence
@@ -600,20 +655,20 @@ ${content}${childContext}
 	private toKnowledgeCapsule(
 		blockId: string,
 		capsule: CaptureAnalysisPayload['knowledgeCapsules'][number],
-		lookup: Map<string, Entity>,
+		index: EntityIndex,
 		evidence: EvidenceRef[],
 		now: string,
-		index: number
+		i: number
 	): KnowledgeCapsule {
 		return {
-			id: this.stableId('capsule', blockId, capsule.title, index),
+			id: this.stableId('capsule', blockId, capsule.title, i),
 			type: capsule.type as KnowledgeCapsuleType,
 			title: capsule.title,
 			content: capsule.content,
 			triggers: capsule.triggers,
 			appliesTo: capsule.appliesTo,
 			avoid: capsule.avoid,
-			relatedEntityIds: this.resolveEntityIds(capsule.relatedEntityNames, lookup),
+			relatedEntityIds: this.resolveEntityIds(capsule.relatedEntityNames, index),
 			evidence,
 			status: 'candidate',
 			confidence: capsule.confidence,
@@ -625,18 +680,18 @@ ${content}${childContext}
 	private toSignalMemory(
 		blockId: string,
 		signal: CaptureAnalysisPayload['signals'][number],
-		lookup: Map<string, Entity>,
+		index: EntityIndex,
 		evidence: EvidenceRef[],
 		now: string,
-		index: number
+		i: number
 	): SignalMemory {
 		return {
-			id: this.stableId('signal', blockId, signal.type, signal.value, index),
+			id: this.stableId('signal', blockId, signal.type, signal.value, i),
 			type: signal.type as SignalType,
 			value: signal.value,
 			intensity: signal.intensity,
 			summary: signal.summary,
-			relatedEntityIds: this.resolveEntityIds(signal.relatedEntityNames, lookup),
+			relatedEntityIds: this.resolveEntityIds(signal.relatedEntityNames, index),
 			evidence,
 			occurredAt: now,
 			confidence: signal.confidence
@@ -646,19 +701,19 @@ ${content}${childContext}
 	private toOpenLoopMemory(
 		blockId: string,
 		openLoop: CaptureAnalysisPayload['openLoops'][number],
-		lookup: Map<string, Entity>,
+		index: EntityIndex,
 		evidence: EvidenceRef[],
 		now: string,
-		index: number
+		i: number
 	): OpenLoopMemory {
 		return {
-			id: this.stableId('open_loop', blockId, openLoop.title, index),
+			id: this.stableId('open_loop', blockId, openLoop.title, i),
 			type: openLoop.type as OpenLoopType,
 			title: openLoop.title,
 			context: openLoop.context,
 			nextStep: openLoop.nextStep,
 			dueAt: openLoop.dueAt,
-			relatedEntityIds: this.resolveEntityIds(openLoop.relatedEntityNames, lookup),
+			relatedEntityIds: this.resolveEntityIds(openLoop.relatedEntityNames, index),
 			evidence,
 			status: 'open',
 			confidence: openLoop.confidence,

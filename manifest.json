@@ -1,7 +1,7 @@
 {
 	"id": "lifewiki",
 	"name": "LifeWiki",
-	"version": "2.0.0",
+	"version": "2.1.4",
 	"minAppVersion": "1.0.0",
 	"description": "Personal memory system that extracts tacit knowledge from daily journals for humans and agents",
 	"author": "d19310",
